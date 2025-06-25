@@ -1,0 +1,38 @@
+{
+  "name": "xml-xpath-extension",
+  "displayName": "XML XPath Extension",
+  "publisher": "your-publisher-name",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.50.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:xml",
+    "onCommand:xmlXpath.getFromCursor"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+       { "command": "xmlXpath.setParent", "title": "Set Parent Tag for XPath" },
+      { "command": "xmlXpath.copyXPath", "title": "Copy XPath from Cursor" },
+      { "command": "xmlXpath.clearParent", "title": "Clear Parent Tag" }
+    ],
+    "keybindings": [
+      {
+        "key": "ctrl+shift+c",
+        "command": "xmlXpath.copyXPath",
+        "when": "editorTextFocus && editorLangId == xml"
+      }
+    ]
+  },
+  "devDependencies": {
+    "vscode": "^1.1.37",
+    "vscode-test": "^1.4.0"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.3"
+  }
+}
