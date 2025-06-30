@@ -1,14 +1,12 @@
 const vscode = require('vscode');
 const CONFIG_SECTION = 'xmlXpath';
-// Activation and deactivation
 let statusBarItem;
+
 function activate(context) {
-  // Status bar
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBarItem.command = 'xmlXpath.copyXPath';
   context.subscriptions.push(statusBarItem);
 
-  // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('xmlXpath.setParent', setParent)
   );
@@ -22,10 +20,12 @@ function activate(context) {
     vscode.commands.registerCommand('xmlXpath.setIgnoreIndexTags', setIgnoreTags)
   );
   context.subscriptions.push(
+    vscode.commands.registerCommand('xmlXpath.setTemplate', setTemplate)
+  );
+  context.subscriptions.push(
     vscode.commands.registerCommand('xmlXpath.copyXPath', copyXPath)
   );
 
-  // Update on cursor move or editor change
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection(update)
   );
@@ -37,12 +37,10 @@ function activate(context) {
 }
 
 function deactivate() {
-  if (statusBarItem) {
-    statusBarItem.dispose();
-  }
+  if (statusBarItem) statusBarItem.dispose();
 }
 
-// Command implementations
+// Commands
 async function setParent() {
   const value = await vscode.window.showInputBox({ prompt: 'Parent tag for relative XPath (leave empty for full)' });
   await vscode.workspace.getConfiguration(CONFIG_SECTION).update('parentTag', value || null, vscode.ConfigurationTarget.Global);
@@ -91,6 +89,20 @@ async function setIgnoreTags() {
   }
 }
 
+async function setTemplate() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get('predicateTemplate', "[@{attr1}='{attr1V}']");
+  const tpl = await vscode.window.showInputBox({
+    prompt: 'Predicate template using tokens {tag},{attr1},{attr1V},{xllv},{xllvI},{idx}',
+    value: current
+  });
+  if (tpl !== undefined) {
+    await cfg.update('predicateTemplate', tpl, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage('Predicate template set.');
+    update();
+  }
+}
+
 async function copyXPath() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
@@ -106,7 +118,6 @@ async function copyXPath() {
 function update() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return statusBarItem.hide();
-
   const xpath = buildXPath(editor.document, editor.selection.active);
   if (xpath) {
     statusBarItem.text = `$(code) ${xpath}`;
@@ -120,16 +131,14 @@ function update() {
 function buildXPath(document, position) {
   const xml = document.getText();
   const offset = document.offsetAt(position);
-
-  // Load settings from xmlXpath section
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const parentTag = cfg.get('parentTag', null);
   const { includeIndices, includeAttributes } = cfg.get('mode', { includeIndices: true, includeAttributes: true });
   const preferred = cfg.get('preferredAttributes', []);
   const ignoreTags = new Set(cfg.get('ignoreIndexTags', []));
+  const tpl = includeAttributes ? cfg.get('predicateTemplate', "[@{attr1}='{attr1V}']") : null;
 
-  // Tokenize
-  const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/)?>/g;
+  const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
   const events = [];
   let m;
   while ((m = tokenRegex.exec(xml))) {
@@ -139,18 +148,18 @@ function buildXPath(document, position) {
     const selfClose = !!m[4];
     const pos = m.index;
     const attrs = {};
-    let customIndex;
-    attrsText.replace(/([\w:\-\.]+)\s*=\s*\"([^\"]*)\"/g, (_, k, v) => {
+    let customIndex, customIndexRaw;
+    attrsText.replace(/([\w:\-\.]+)\s*=\s*"([^\"]*)"/g, (_, k, v) => {
       if (k === 'xlink:lable') {
+        customIndexRaw = v;
         const num = v.match(/(\d+)$/);
         if (num) customIndex = Number(num[1]);
       } else if (!k.startsWith('xmlns')) {
         attrs[k] = v;
       }
     });
-
     if (!isClose) {
-      events.push({ type: 'open', tag, attrs, pos, customIndex });
+      events.push({ type: 'open', tag, attrs, pos, customIndex, customIndexRaw });
       if (selfClose) events.push({ type: 'close', tag, pos });
     } else {
       events.push({ type: 'close', tag, pos });
@@ -158,7 +167,6 @@ function buildXPath(document, position) {
     if (pos > offset) break;
   }
 
-  // Walk to offset
   const stack = [];
   const counters = [];
   for (const ev of events) {
@@ -169,7 +177,6 @@ function buildXPath(document, position) {
       counters[depth][ev.tag] = (counters[depth][ev.tag] || 0) + 1;
       const idx = counters[depth][ev.tag];
 
-      // pick attr by preference only
       let pickName, pickVal;
       for (const pref of preferred) {
         if (ev.attrs[pref]) {
@@ -178,15 +185,12 @@ function buildXPath(document, position) {
           break;
         }
       }
-      // no fallback: if element doesn’t have one of the preferred attributes, skip attributes
-
-      stack.push({ tag: ev.tag, idx, customIndex: ev.customIndex, attrName: pickName, attrValue: pickVal });
-    } else {
-      if (stack.length && stack[stack.length-1].tag === ev.tag) stack.pop();
+      stack.push({ tag: ev.tag, idx, customIndex: ev.customIndex, customIndexRaw: ev.customIndexRaw, attrName: pickName, attrValue: pickVal });
+    } else if (stack.length && stack[stack.length-1].tag === ev.tag) {
+      stack.pop();
     }
   }
 
-  // apply parentTag
   let path = stack;
   if (parentTag) {
     const i = stack.findIndex(n => n.tag === parentTag);
@@ -194,10 +198,19 @@ function buildXPath(document, position) {
   }
   if (!path.length) return null;
 
-  // build segments
   const segments = path.map((n, i) => {
     let s = n.tag;
-    if (includeAttributes && n.attrName && n.attrValue) {
+    if (tpl && n.attrName && n.attrValue) {
+      const data = {
+        tag: n.tag,
+        attr1: n.attrName,
+        attr1V: n.attrValue,
+        xllv: n.customIndexRaw || '',
+        xllvI: n.customIndex != null ? n.customIndex : '',
+        idx: n.idx
+      };
+      s += tpl.replace(/\{(\w+)\}/g, (_, key) => data[key] || '');
+    } else if (includeAttributes && n.attrName && n.attrValue) {
       s += `[@${n.attrName}='${n.attrValue}']`;
     }
     if (includeIndices && i > 0) {
@@ -206,6 +219,7 @@ function buildXPath(document, position) {
     }
     return s;
   });
+
   return '/' + segments.join('/');
 }
 

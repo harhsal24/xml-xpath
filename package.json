@@ -44,7 +44,12 @@
       {
         "command": "xmlXpath.setIgnoreIndexTags",
         "title": "Set Ignore-Index Tags"
-      }
+      },
+       {
+      "command": "xmlXpath.setTemplate",
+      "title": "Set Predicate Template",
+      "category": "XML XPath"
+    }
     ],
     "keybindings": [
       {
@@ -89,6 +94,11 @@
           "items": { "type": "string" },
           "default": [],
           "description": "Tags for which index [1] should be omitted in XPath."
+        },
+        "xmlXpath.predicateTemplate": {
+          "type": "string",
+          "default": "[@{attr1}='{attr1V}']",
+          "description": "Template for predicate rendering. Tokens: {tag}, {attr1}, {attr1V}, {xllv}, {xllvI}, {idx}."
         }
       }
     }
