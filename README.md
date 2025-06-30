@@ -1,188 +1,119 @@
-const vscode = require('vscode');
+# XML XPath Extension
 
-let statusBarItem;
+A lightweight Visual Studio Code extension that generates precise XPath expressions for XML elements under your cursor. With flexible configuration and real-time status updates, it streamlines XML navigation, testing, and automation.
 
-function activate(context) {
-    // Create status bar item
-    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    statusBarItem.command = 'xpath.copyXPath';
-    context.subscriptions.push(statusBarItem);
+## Key Features
 
-    // Register commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('xpath.setMode', setMode)
-    );
-    context.subscriptions.push(
-        vscode.commands.registerCommand('xpath.setPreferredAttributes', setPreferredAttributes)
-    );
-    context.subscriptions.push(
-        vscode.commands.registerCommand('xpath.setIgnoreIndexTags', setIgnoreIndexTags)
-    );
-    context.subscriptions.push(
-        vscode.commands.registerCommand('xpath.setParentTag', setParentTag)
-    );
-    context.subscriptions.push(
-        vscode.commands.registerCommand('xpath.copyXPath', copyXPath)
-    );
+- **Flexible Path Modes**: Choose between four generation modes:
+  - **With Indices & Attributes**: Full precision including sibling indices (`[n]`) and attribute predicates (`[@id='value']`).
+  - **Attributes Only**: Predicate filters based on attributes, but omit positional indices.
+  - **Indices Only**: Rely solely on the element’s position among siblings, useful for static XML structures.
+  - **Simple Path**: A clean, slash-separated element path without any predicates or indices.
 
-    // Update on cursor move or active editor change
-    context.subscriptions.push(
-        vscode.window.onDidChangeTextEditorSelection(updateStatusBar)
-    );
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(updateStatusBar)
-    );
+- **Preferred Attribute Selection**: Define a prioritized list (e.g. `id, name, class`) so the extension picks the most meaningful attribute for each element predicate.
 
-    updateStatusBar();
-}
+- **Ignore Default Index**: Suppress the “`[1]`” suffix for first-occurrence elements on your chosen tags (e.g. omit `[1]` for container elements like `section` or `div`).
 
-function deactivate() {
-    if (statusBarItem) {
-        statusBarItem.dispose();
-    }
-}
+- **Relative XPath Generation**: Set a custom **parent tag** so the returned path starts from that ancestor, producing shorter, context-aware XPaths.
 
-async function setMode() {
-    const modes = [
-        { label: 'With Indices & Attributes', value: 'both' },
-        { label: 'Attributes Only', value: 'attrs' },
-        { label: 'Indices Only', value: 'index' },
-        { label: 'Simple Path', value: 'simple' },
-    ];
-    const choice = await vscode.window.showQuickPick(modes, { placeHolder: 'Select XPath generation mode' });
-    if (!choice) return;
-    await vscode.workspace.getConfiguration('xpath').update('mode', choice.value, vscode.ConfigurationTarget.Global);
-    updateStatusBar();
-}
+- **Real-Time Status Bar Updates**: View the current XPath at all times as you move the cursor through your XML document.
 
-async function setPreferredAttributes() {
-    const input = await vscode.window.showInputBox({ prompt: 'Comma-separated list of preferred attributes (e.g. id,name,class)' });
-    if (input === undefined) return;
-    const list = input.split(',').map(s => s.trim()).filter(Boolean);
-    await vscode.workspace.getConfiguration('xpath').update('preferredAttrs', list, vscode.ConfigurationTarget.Global);
-    updateStatusBar();
-}
+## Installation
 
-async function setIgnoreIndexTags() {
-    const input = await vscode.window.showInputBox({ prompt: 'Comma-separated list of tags to ignore default [1] index' });
-    if (input === undefined) return;
-    const list = input.split(',').map(s => s.trim()).filter(Boolean);
-    await vscode.workspace.getConfiguration('xpath').update('ignoreIndexTags', list, vscode.ConfigurationTarget.Global);
-    updateStatusBar();
-}
+1. Clone or download this repository.
+2. In VS Code, press `F5` to launch the extension in a new Extension Development Host window.
+3. Alternatively, install from the VS Code Marketplace (coming soon).
 
-async function setParentTag() {
-    const input = await vscode.window.showInputBox({ prompt: 'Ancestor tag name to start relative XPath (leave empty for full)' });
-    if (input === undefined) return;
-    const tag = input.trim() || null;
-    await vscode.workspace.getConfiguration('xpath').update('parentTag', tag, vscode.ConfigurationTarget.Global);
-    updateStatusBar();
-}
+## Usage Guide
 
-function copyXPath() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
-    const xpath = computeXPathForEditor(editor);
-    vscode.env.clipboard.writeText(xpath);
-    vscode.window.showInformationMessage(`XPath copied: ${xpath}`);
-}
+### 1. Configure Your Preferences
+- **Set XPath Mode**: Open the Command Palette (`Ctrl+Shift+P`), type `Set XPath Mode`, and choose your preferred generation style.
+- **Set Preferred Attributes**: Run `Set Preferred Attributes` and enter a comma-separated list (e.g. `id, name, class`) in order of priority.
+- **Set Ignore-Index Tags**: Run `Set Ignore-Index Tags` to list tags for which the default index `[1]` should not appear (e.g. `root, section`).
+- **Set Parent Tag** (optional): Run `Set Parent Tag for XPath` and provide an ancestor tag name; XPaths will begin from this tag.
 
-function updateStatusBar() {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-        statusBarItem.hide();
-        return;
-    }
-    const xpath = computeXPathForEditor(editor);
-    statusBarItem.text = `$(code) ${xpath}`;
-    statusBarItem.tooltip = 'Click to copy XPath';
-    statusBarItem.show();
-}
+### 2. Copy the XPath
+- Place your cursor inside any XML element.
+- Press **Ctrl+Shift+C** (or run `Copy XPath from Cursor` from the Command Palette).
+- The generated XPath is automatically copied to your clipboard.
 
-function computeXPathForEditor(editor) {
-    const doc = editor.document;
-    const cursorPos = editor.selection.active;
-    const offset = doc.offsetAt(cursorPos);
-    const text = doc.getText();
-    return computeXPath(text, offset);
-}
+### 3. Real-Time Feedback
+- As you move the cursor, the status bar displays the current XPath using your active configuration.
+- Click the status bar text to copy at any point without opening the command palette.
 
-// Core XPath builder
-function computeXPath(xmlText, offset) {
-    const config = vscode.workspace.getConfiguration('xpath');
-    const mode = config.get('mode', 'both');
-    const preferred = config.get('preferredAttrs', []);
-    const ignoreTags = new Set(config.get('ignoreIndexTags', []));
-    const parentTag = config.get('parentTag', null);
+## Example
 
-    // Tokenize XML into events
-    const tokenRegex = /<\s*(\/)?([\w:\-\.]+)([^>]*)>/g;
-    let match;
-    const events = [];
-    while ((match = tokenRegex.exec(xmlText))) {
-        const isClose = !!match[1];
-        const tag = match[2];
-        const attrsText = match[3] || '';
-        const pos = match.index;
-        const endPos = tokenRegex.lastIndex;
-        const attrs = {};
-        attrsText.replace(/([\w:\-\.]+)\s*=\s*['\"]([^'\"]*)['\"]/g, (_, n, v) => { attrs[n] = v; });
-        events.push({ type: isClose ? 'close' : 'open', tag, attrs, pos, endPos });
-    }
+### Simple Example
 
-    // Walk events to build path hierarchy at offset
-    const stack = [];
-    const siblingCounters = [];
-    for (const ev of events) {
-        if (ev.pos > offset) break;
-        if (ev.type === 'open') {
-            // ensure counter for this depth
-            const depth = stack.length;
-            if (!siblingCounters[depth]) siblingCounters[depth] = {};
-            const cnts = siblingCounters[depth];
-            cnts[ev.tag] = (cnts[ev.tag] || 0) + 1;
-            // push element
-            stack.push({ tag: ev.tag, attrs: ev.attrs, idx: cnts[ev.tag] });
-        } else {
-            // close: pop matching tag
-            if (stack.length && stack[stack.length - 1].tag === ev.tag) {
-                stack.pop();
-            }
-        }
-    }
+```xml
+<document>
+  <section name="intro">
+    <item id="first"/>
+    <item id="second"/>
+  </section>
+</document>
+```
 
-    // Trim stack to parentTag if set
-    let pathStack = stack;
-    if (parentTag) {
-        const idx = stack.findIndex(e => e.tag === parentTag);
-        if (idx >= 0) {
-            pathStack = stack.slice(idx);
-        }
-    }
+- **With Indices & Attributes**:  
+  `/document/section[@name='intro']/item[@id='second'][2]`
+- **Attributes Only**:  
+  `/document/section[@name='intro']/item[@id='second']`
+- **Indices Only**:  
+  `/document/section[1]/item[2]`
+- **Simple Path**:  
+  `/document/section/item`
 
-    // Build segments
-    const segments = pathStack.map(node => {
-        let seg = node.tag;
-        // attributes
-        if ((mode === 'both' || mode === 'attrs') && node.attrs) {
-            for (const attrName of preferred) {
-                if (node.attrs[attrName]) {
-                    seg += `[@${attrName}='${node.attrs[attrName]}']`;
-                    break;
-                }
-            }
-        }
-        // index
-        const needIndex = (mode === 'both' || mode === 'index') && (!ignoreTags.has(node.tag) || node.idx !== 1);
-        if (needIndex) {
-            seg += `[${node.idx}]`;
-        }
-        return seg;
-    });
+### Nested Sections with xlink:lable and Ignore-Index
 
-    // Prepend slash
-    const path = '/' + segments.join('/');
-    return path;
-}
+Given:
+```xml
+<document>
+  <section xlink:lable='first1' name="intro">
+    <item id="first"/>
+    <item id="second"/>
+    <container>
+      <item id="nestedA"/>
+      <item id="nestedB"/>
+    </container>
+  </section>
+  <section xlink:lable='second2' name="intro">
+    <item id="fourth"/>
+    <item id="fifth"/>
+    <container>
+      <item id="nestedC"/>
+      <item id="nestedD"/>
+    </container>
+  </section>
+</document>
+```
 
-module.exports = { activate, deactivate };
+With settings:
+- **Mode**: With Indices & Attributes  
+- **Preferred Attributes**: `name, id`  
+- **Ignore-Index Tags**: `section, container`
+
+Cursor inside `<item id="nestedD"/>`, the extension yields:
+
+```
+/document/section[@name='intro'][2]/container/item[@id='nestedD'][2]
+```
+
+This path:  
+- Skips `[1]` on both `section` and `container` (ignore-index)  
+- Uses `[@name='intro']` on the second `section`  
+- Includes `[2]` on the target `item` based on its sibling position  
+
+## Under the Hood
+
+1. **Tokenization**: Scans the entire XML text to record each opening and closing tag with its position.
+2. **Stack-Based Path Building**: Maintains a `pathStack` of currently open elements, pushing on opening tags and popping on closing tags.
+3. **Sibling Index Counting**: Uses `tagDepthCounters`—a per-depth counter map—to assign accurate `[n]` indices for elements as they appear.
+4. **Attribute Parsing**: Extracts all attributes, applies custom index detection (`xlink:lable`), then selects the highest-priority attribute for predicates.
+5. **Options Application**: Merges user settings (`includeIndices`, `includeAttributes`, `ignoreIndexTags`, `preferredAttrs`, and optional `parentTag`) to format the final XPath.
+
+## Troubleshooting
+
+- **Missing or incorrect index**: Ensure you’ve reloaded the extension after changing mode or ignore-tag settings. Check the status bar to confirm active configuration.
+- **Extension activation errors**: Verify your `package.json` includes all new commands (`setIgnoreIndexTags`) in `activationEvents` and `contributes.commands`.
+- **Nested sibling issues**: This extension uses a robust stack-based approach, but very large XML files might impact performance. Try splitting or simplifying if needed.
+

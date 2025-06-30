@@ -42,16 +42,10 @@ function deactivate() {
   }
 }
 
-// State keys
-const PARENT_KEY = 'xmlXpath.parentTag';
-const MODE_KEY = 'xmlXpath.mode';
-const ATTRS_KEY = 'xmlXpath.preferredAttributes';
-const IGNORE_KEY = 'xmlXpath.ignoreIndexTags';
-
 // Command implementations
 async function setParent() {
   const value = await vscode.window.showInputBox({ prompt: 'Parent tag for relative XPath (leave empty for full)' });
-  await vscode.workspace.getConfiguration().update(PARENT_KEY, value || null, vscode.ConfigurationTarget.Global);
+  await vscode.workspace.getConfiguration(CONFIG_SECTION).update('parentTag', value || null, vscode.ConfigurationTarget.Global);
   update();
 }
 
@@ -64,43 +58,35 @@ async function setMode() {
   ];
   const pick = await vscode.window.showQuickPick(options, { placeHolder: 'Select XPath mode' });
   if (pick) {
-    await vscode.workspace.getConfiguration().update(MODE_KEY, pick.value, vscode.ConfigurationTarget.Global);
+    await vscode.workspace.getConfiguration(CONFIG_SECTION).update('mode', pick.value, vscode.ConfigurationTarget.Global);
     update();
   }
 }
 
 async function setPreferredAttrs() {
-  // Grab the xmlXpath.* configuration object
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  // Read the current list (so we can pre‑populate the input box)
   const current = cfg.get('preferredAttributes', []);
-  // Ask the user for a comma‑separated list
   const input = await vscode.window.showInputBox({
     prompt: 'Preferred attributes (comma-separated, e.g. id,name,class)',
     value: current.join(',')
   });
-  if (input === undefined) {
-    // user cancelled
-    return;
-  }
-   // Build the array and persist under xmlXpath.preferredAttributes
-  const list = input
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-
+  if (input === undefined) return;
+  const list = input.split(',').map(s => s.trim()).filter(Boolean);
   await cfg.update('preferredAttributes', list, vscode.ConfigurationTarget.Global);
-
   vscode.window.showInformationMessage(`Preferred attributes set to: ${list.join(', ')}`);
-  update();  // refresh the status bar
+  update();
 }
 
 async function setIgnoreTags() {
-  const current = vscode.workspace.getConfiguration().get(IGNORE_KEY, []);
-  const input = await vscode.window.showInputBox({ prompt: 'Tags to ignore index [1] (comma-separated)', value: current.join(',') });
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get('ignoreIndexTags', []);
+  const input = await vscode.window.showInputBox({
+    prompt: 'Tags to ignore index [1] (comma-separated)',
+    value: current.join(',')
+  });
   if (input !== undefined) {
     const list = input.split(',').map(s => s.trim()).filter(Boolean);
-    await vscode.workspace.getConfiguration().update(IGNORE_KEY, list, vscode.ConfigurationTarget.Global);
+    await cfg.update('ignoreIndexTags', list, vscode.ConfigurationTarget.Global);
     update();
   }
 }
@@ -117,7 +103,6 @@ async function copyXPath() {
   }
 }
 
-// Update status bar text
 function update() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return statusBarItem.hide();
@@ -132,17 +117,16 @@ function update() {
   }
 }
 
-// Build XPath from document & position
 function buildXPath(document, position) {
   const xml = document.getText();
   const offset = document.offsetAt(position);
 
-  // Load settings
-  const cfg = vscode.workspace.getConfiguration();
-  const parentTag = cfg.get(PARENT_KEY, null);
-  const { includeIndices, includeAttributes } = cfg.get(MODE_KEY, { includeIndices: true, includeAttributes: true });
-  const preferred = cfg.get(ATTRS_KEY, []);
-  const ignoreTags = new Set(cfg.get(IGNORE_KEY, []));
+  // Load settings from xmlXpath section
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const parentTag = cfg.get('parentTag', null);
+  const { includeIndices, includeAttributes } = cfg.get('mode', { includeIndices: true, includeAttributes: true });
+  const preferred = cfg.get('preferredAttributes', []);
+  const ignoreTags = new Set(cfg.get('ignoreIndexTags', []));
 
   // Tokenize
   const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/)?>/g;
@@ -156,7 +140,7 @@ function buildXPath(document, position) {
     const pos = m.index;
     const attrs = {};
     let customIndex;
-    attrsText.replace(/([\w:\-\.]+)\s*=\s*"([^\"]*)"/g, (_, k, v) => {
+    attrsText.replace(/([\w:\-\.]+)\s*=\s*\"([^\"]*)\"/g, (_, k, v) => {
       if (k === 'xlink:lable') {
         const num = v.match(/(\d+)$/);
         if (num) customIndex = Number(num[1]);
@@ -185,7 +169,7 @@ function buildXPath(document, position) {
       counters[depth][ev.tag] = (counters[depth][ev.tag] || 0) + 1;
       const idx = counters[depth][ev.tag];
 
-      // pick attr
+      // pick attr by preference only
       let pickName, pickVal;
       for (const pref of preferred) {
         if (ev.attrs[pref]) {
@@ -194,13 +178,7 @@ function buildXPath(document, position) {
           break;
         }
       }
-      if (!pickName) {
-        const first = Object.keys(ev.attrs)[0];
-        if (first) {
-          pickName = first;
-          pickVal = ev.attrs[first];
-        }
-      }
+      // no fallback: if element doesn’t have one of the preferred attributes, skip attributes
 
       stack.push({ tag: ev.tag, idx, customIndex: ev.customIndex, attrName: pickName, attrValue: pickVal });
     } else {
@@ -212,19 +190,19 @@ function buildXPath(document, position) {
   let path = stack;
   if (parentTag) {
     const i = stack.findIndex(n => n.tag === parentTag);
-    if (i>=0) path = stack.slice(i);
+    if (i >= 0) path = stack.slice(i);
   }
   if (!path.length) return null;
 
   // build segments
-  const segments = path.map((n,i) => {
+  const segments = path.map((n, i) => {
     let s = n.tag;
     if (includeAttributes && n.attrName && n.attrValue) {
       s += `[@${n.attrName}='${n.attrValue}']`;
     }
-    if (includeIndices && i>0) {
+    if (includeIndices && i > 0) {
       const ix = n.customIndex != null ? n.customIndex : n.idx;
-      if (!(ix===1 && ignoreTags.has(n.tag))) s += `[${ix}]`;
+      if (!(ix === 1 && ignoreTags.has(n.tag))) s += `[${ix}]`;
     }
     return s;
   });
