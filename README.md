@@ -1,65 +1,188 @@
-# xml-xpath README
+const vscode = require('vscode');
 
-This is the README for your extension "xml-xpath". After writing up a brief description, we recommend including the following sections.
+let statusBarItem;
 
-## Features
+function activate(context) {
+    // Create status bar item
+    statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusBarItem.command = 'xpath.copyXPath';
+    context.subscriptions.push(statusBarItem);
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+    // Register commands
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xpath.setMode', setMode)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xpath.setPreferredAttributes', setPreferredAttributes)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xpath.setIgnoreIndexTags', setIgnoreIndexTags)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xpath.setParentTag', setParentTag)
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('xpath.copyXPath', copyXPath)
+    );
 
-For example if there is an image subfolder under your extension project workspace:
+    // Update on cursor move or active editor change
+    context.subscriptions.push(
+        vscode.window.onDidChangeTextEditorSelection(updateStatusBar)
+    );
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(updateStatusBar)
+    );
 
-\!\[feature X\]\(images/feature-x.png\)
+    updateStatusBar();
+}
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+function deactivate() {
+    if (statusBarItem) {
+        statusBarItem.dispose();
+    }
+}
 
-## Requirements
+async function setMode() {
+    const modes = [
+        { label: 'With Indices & Attributes', value: 'both' },
+        { label: 'Attributes Only', value: 'attrs' },
+        { label: 'Indices Only', value: 'index' },
+        { label: 'Simple Path', value: 'simple' },
+    ];
+    const choice = await vscode.window.showQuickPick(modes, { placeHolder: 'Select XPath generation mode' });
+    if (!choice) return;
+    await vscode.workspace.getConfiguration('xpath').update('mode', choice.value, vscode.ConfigurationTarget.Global);
+    updateStatusBar();
+}
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+async function setPreferredAttributes() {
+    const input = await vscode.window.showInputBox({ prompt: 'Comma-separated list of preferred attributes (e.g. id,name,class)' });
+    if (input === undefined) return;
+    const list = input.split(',').map(s => s.trim()).filter(Boolean);
+    await vscode.workspace.getConfiguration('xpath').update('preferredAttrs', list, vscode.ConfigurationTarget.Global);
+    updateStatusBar();
+}
 
-## Extension Settings
+async function setIgnoreIndexTags() {
+    const input = await vscode.window.showInputBox({ prompt: 'Comma-separated list of tags to ignore default [1] index' });
+    if (input === undefined) return;
+    const list = input.split(',').map(s => s.trim()).filter(Boolean);
+    await vscode.workspace.getConfiguration('xpath').update('ignoreIndexTags', list, vscode.ConfigurationTarget.Global);
+    updateStatusBar();
+}
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+async function setParentTag() {
+    const input = await vscode.window.showInputBox({ prompt: 'Ancestor tag name to start relative XPath (leave empty for full)' });
+    if (input === undefined) return;
+    const tag = input.trim() || null;
+    await vscode.workspace.getConfiguration('xpath').update('parentTag', tag, vscode.ConfigurationTarget.Global);
+    updateStatusBar();
+}
 
-For example:
+function copyXPath() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const xpath = computeXPathForEditor(editor);
+    vscode.env.clipboard.writeText(xpath);
+    vscode.window.showInformationMessage(`XPath copied: ${xpath}`);
+}
 
-This extension contributes the following settings:
+function updateStatusBar() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        statusBarItem.hide();
+        return;
+    }
+    const xpath = computeXPathForEditor(editor);
+    statusBarItem.text = `$(code) ${xpath}`;
+    statusBarItem.tooltip = 'Click to copy XPath';
+    statusBarItem.show();
+}
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+function computeXPathForEditor(editor) {
+    const doc = editor.document;
+    const cursorPos = editor.selection.active;
+    const offset = doc.offsetAt(cursorPos);
+    const text = doc.getText();
+    return computeXPath(text, offset);
+}
 
-## Known Issues
+// Core XPath builder
+function computeXPath(xmlText, offset) {
+    const config = vscode.workspace.getConfiguration('xpath');
+    const mode = config.get('mode', 'both');
+    const preferred = config.get('preferredAttrs', []);
+    const ignoreTags = new Set(config.get('ignoreIndexTags', []));
+    const parentTag = config.get('parentTag', null);
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+    // Tokenize XML into events
+    const tokenRegex = /<\s*(\/)?([\w:\-\.]+)([^>]*)>/g;
+    let match;
+    const events = [];
+    while ((match = tokenRegex.exec(xmlText))) {
+        const isClose = !!match[1];
+        const tag = match[2];
+        const attrsText = match[3] || '';
+        const pos = match.index;
+        const endPos = tokenRegex.lastIndex;
+        const attrs = {};
+        attrsText.replace(/([\w:\-\.]+)\s*=\s*['\"]([^'\"]*)['\"]/g, (_, n, v) => { attrs[n] = v; });
+        events.push({ type: isClose ? 'close' : 'open', tag, attrs, pos, endPos });
+    }
 
-## Release Notes
+    // Walk events to build path hierarchy at offset
+    const stack = [];
+    const siblingCounters = [];
+    for (const ev of events) {
+        if (ev.pos > offset) break;
+        if (ev.type === 'open') {
+            // ensure counter for this depth
+            const depth = stack.length;
+            if (!siblingCounters[depth]) siblingCounters[depth] = {};
+            const cnts = siblingCounters[depth];
+            cnts[ev.tag] = (cnts[ev.tag] || 0) + 1;
+            // push element
+            stack.push({ tag: ev.tag, attrs: ev.attrs, idx: cnts[ev.tag] });
+        } else {
+            // close: pop matching tag
+            if (stack.length && stack[stack.length - 1].tag === ev.tag) {
+                stack.pop();
+            }
+        }
+    }
 
-Users appreciate release notes as you update your extension.
+    // Trim stack to parentTag if set
+    let pathStack = stack;
+    if (parentTag) {
+        const idx = stack.findIndex(e => e.tag === parentTag);
+        if (idx >= 0) {
+            pathStack = stack.slice(idx);
+        }
+    }
 
-### 1.0.0
+    // Build segments
+    const segments = pathStack.map(node => {
+        let seg = node.tag;
+        // attributes
+        if ((mode === 'both' || mode === 'attrs') && node.attrs) {
+            for (const attrName of preferred) {
+                if (node.attrs[attrName]) {
+                    seg += `[@${attrName}='${node.attrs[attrName]}']`;
+                    break;
+                }
+            }
+        }
+        // index
+        const needIndex = (mode === 'both' || mode === 'index') && (!ignoreTags.has(node.tag) || node.idx !== 1);
+        if (needIndex) {
+            seg += `[${node.idx}]`;
+        }
+        return seg;
+    });
 
-Initial release of ...
+    // Prepend slash
+    const path = '/' + segments.join('/');
+    return path;
+}
 
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code.  Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux)
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux)
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+module.exports = { activate, deactivate };

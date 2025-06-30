@@ -1,311 +1,218 @@
 const vscode = require('vscode');
 
-// Utility to compute XPath with configurable options
-function computeXPath(path, options = {}) {
-  const { includeIndices = true, includeAttributes = true } = options;
-  
-  return path.map((p, idx) => {
-    let part = p.tag;
-    
-    // Add predicate for attribute (if enabled and available)
-    if (includeAttributes && p.attrName && p.attrValue) {
-      part += `[@${p.attrName}='${p.attrValue}']`;
-    }
-    
-    // Add index: skip for root, and only if includeIndices is true
-    if (includeIndices && idx > 0) {
-      const index = p.customIndex != null ? p.customIndex : p.index;
-      part += `[${index}]`;
-    }
-    
-    return part;
-  }).join('/');
-}
-
-// Extract first custom index from xlink:lable, and pick attribute for predicate
-function parseAttributes(attrsString) {
-  const attrs = {};
-  const regex = /([\w:\-]+)\s*=\s*"([^"]*)"/g;
-  let match;
-  let customIndex;
-  
-  while ((match = regex.exec(attrsString))) {
-    const key = match[1];
-    const value = match[2];
-    if (key.startsWith('xmlns')) continue;
-    if (key === 'xlink:lable') {
-      const m = value.match(/(\d+)$/);
-      if (m) customIndex = parseInt(m[1], 10);
-      continue; // don't include xlink:lable in predicate attrs
-    }
-    attrs[key] = value;
-  }
-  
-  // Choose attribute for predicate based on priority
-  let attrName, attrValue;
-  if ('ValuationUseType' in attrs) {
-    attrName = 'ValuationUseType'; 
-    attrValue = attrs['ValuationUseType'];
-  } else if ('name' in attrs) {
-    attrName = 'name'; 
-    attrValue = attrs['name'];
-  } else if ('id' in attrs) {
-    attrName = 'id'; 
-    attrValue = attrs['id'];
-  } else {
-    const firstKey = Object.keys(attrs)[0];
-    if (firstKey) {
-      attrName = firstKey; 
-      attrValue = attrs[firstKey];
-    }
-  }
-  
-  return { attrName, attrValue, customIndex, allAttrs: attrs };
-}
-
-// Build path from cursor to parent with correct sibling indexing
-function getXPathFromCursor(document, position, parentTag, options = {}) {
-  const xmlText = document.getText();
-  const cursorOffset = document.offsetAt(position);
-  
-  // Parse the entire XML to build a proper tree structure
-  const elements = [];
-  const tagRegex = /<(\/?)([\w:\-\.]+)([^>]*)>/g;
-  let match;
-  
-  while ((match = tagRegex.exec(xmlText))) {
-    const isClosing = !!match[1];
-    const tag = match[2];
-    const attrsString = match[3];
-    const start = match.index;
-    const end = tagRegex.lastIndex;
-    
-    elements.push({
-      isClosing,
-      tag,
-      attrsString,
-      start,
-      end
-    });
-  }
-  
-  // Build the path stack and calculate correct indices
-  const pathStack = [];
-  const depthCounters = []; // Track sibling counts at each depth level
-  
-  for (const element of elements) {
-    const { isClosing, tag, attrsString, start, end } = element;
-    const currentDepth = pathStack.length;
-    
-    if (!isClosing) {
-      // Initialize counter for this depth if not exists
-      if (!depthCounters[currentDepth]) {
-        depthCounters[currentDepth] = {};
-      }
-      
-      // Count this sibling
-      depthCounters[currentDepth][tag] = (depthCounters[currentDepth][tag] || 0) + 1;
-      const siblingIndex = depthCounters[currentDepth][tag];
-      
-      const { attrName, attrValue, customIndex, allAttrs } = parseAttributes(attrsString);
-      
-      pathStack.push({
-        tag,
-        index: siblingIndex,
-        attrName,
-        attrValue,
-        customIndex,
-        allAttrs
-      });
-      
-      // Check if cursor is within this element's opening tag
-      if (cursorOffset >= start && cursorOffset <= end) {
-        break;
-      }
-    } else {
-      // Closing tag - pop from stack and reset deeper level counters
-      pathStack.pop();
-      // Clear counters for deeper levels
-      depthCounters.splice(currentDepth);
-      
-      // Check if cursor is within this closing tag
-      if (cursorOffset >= start && cursorOffset <= end) {
-        break;
-      }
-    }
-  }
-
-  if (pathStack.length === 0) return null;
-
-  // Determine parent or root
-  const effectiveParent = parentTag || pathStack[0]?.tag;
-  if (!effectiveParent) return null;
-  
-  const idxParent = pathStack.map(p => p.tag).lastIndexOf(effectiveParent);
-  if (idxParent < 0) return null;
-  
-  const relative = pathStack.slice(idxParent);
-  return '/' + computeXPath(relative, options);
-}
-
-// Show XPath generation options dialog
-async function showXPathOptions() {
-  const options = await vscode.window.showQuickPick([
-    {
-      label: '$(list-ordered) With Indices & Attributes',
-      description: 'Include position indices and attribute predicates',
-      detail: 'Example: /root/element[@id="value"][1]/child[2]',
-      value: { includeIndices: true, includeAttributes: true }
-    },
-    {
-      label: '$(list-unordered) With Attributes Only',
-      description: 'Include attribute predicates but no indices',
-      detail: 'Example: /root/element[@id="value"]/child',
-      value: { includeIndices: false, includeAttributes: true }
-    },
-    {
-      label: '$(symbol-numeric) With Indices Only',
-      description: 'Include position indices but no attribute predicates',
-      detail: 'Example: /root/element[1]/child[2]',
-      value: { includeIndices: true, includeAttributes: false }
-    },
-    {
-      label: '$(dash) Simple Path',
-      description: 'No indices or attributes - simple element path',
-      detail: 'Example: /root/element/child',
-      value: { includeIndices: false, includeAttributes: false }
-    }
-  ], {
-    placeHolder: 'Select XPath format',
-    title: 'XPath Generation Options'
-  });
-
-  return options?.value;
-}
-
+// Activation and deactivation
+let statusBarItem;
 function activate(context) {
-  const stateKey = 'xmlXpath.parentTag';
-  const optionsKey = 'xmlXpath.defaultOptions';
-  
-  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  statusBarItem.tooltip = 'Click to copy XPath or right-click for options';
+  // Status bar
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBarItem.command = 'xmlXpath.copyXPath';
   context.subscriptions.push(statusBarItem);
 
-  // Set parent tag command
+  // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('xmlXpath.setParent', async () => {
-      const parentTag = await vscode.window.showInputBox({ 
-        prompt: 'Enter parent tag name for relative XPath generation',
-        placeHolder: 'e.g., root, document, data'
-      });
-      if (parentTag) {
-        await context.workspaceState.update(stateKey, parentTag);
-        statusBarItem.text = `Parent: ${parentTag}`;
-        statusBarItem.show();
-        vscode.window.showInformationMessage(`Parent tag set to '${parentTag}'`);
-        updateXPath();
-      }
-    })
+    vscode.commands.registerCommand('xmlXpath.setParent', setParent)
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('xmlXpath.setMode', setMode)
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('xmlXpath.setPreferredAttributes', setPreferredAttrs)
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('xmlXpath.setIgnoreIndexTags', setIgnoreTags)
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('xmlXpath.copyXPath', copyXPath)
   );
 
-  // Clear parent tag command
+  // Update on cursor move or editor change
   context.subscriptions.push(
-    vscode.commands.registerCommand('xmlXpath.clearParent', async () => {
-      await context.workspaceState.update(stateKey, undefined);
-      updateXPath();
-      vscode.window.showInformationMessage('Parent tag cleared');
-    })
+    vscode.window.onDidChangeTextEditorSelection(update)
+  );
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(update)
   );
 
-  // Set default XPath options
-  context.subscriptions.push(
-    vscode.commands.registerCommand('xmlXpath.setOptions', async () => {
-      const options = await showXPathOptions();
-      if (options) {
-        await context.workspaceState.update(optionsKey, options);
-        vscode.window.showInformationMessage('Default XPath options updated');
-        updateXPath();
-      }
-    })
-  );
-
-  // Update XPath display
-  const updateXPath = () => {
-    const parentTag = context.workspaceState.get(stateKey);
-    const defaultOptions = context.workspaceState.get(optionsKey, { 
-      includeIndices: true, 
-      includeAttributes: true 
-    });
-    
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      statusBarItem.hide();
-      return;
-    }
-    
-    const xpath = getXPathFromCursor(editor.document, editor.selection.active, parentTag, defaultOptions);
-    if (xpath) {
-      const parentText = parentTag ? ` (from ${parentTag})` : '';
-      statusBarItem.text = `XPath: ${xpath}${parentText}`;
-      statusBarItem.show();
-    } else {
-      statusBarItem.hide();
-    }
-  };
-
-  // Event listeners
-  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(updateXPath));
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateXPath));
-
-  // Copy XPath command (with options dialog)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('xmlXpath.copyXPath', async () => {
-      const parentTag = context.workspaceState.get(stateKey);
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) return;
-
-      const options = await showXPathOptions();
-      if (!options) return;
-
-      const xpath = getXPathFromCursor(editor.document, editor.selection.active, parentTag, options);
-      if (xpath) {
-        await vscode.env.clipboard.writeText(xpath);
-        vscode.window.showInformationMessage(`XPath copied: ${xpath}`);
-      } else {
-        vscode.window.showErrorMessage('Cannot compute XPath at current cursor position');
-      }
-    })
-  );
-
-  // Copy XPath with default options (quick copy)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('xmlXpath.copyXPathQuick', async () => {
-      const parentTag = context.workspaceState.get(stateKey);
-      const defaultOptions = context.workspaceState.get(optionsKey, { 
-        includeIndices: true, 
-        includeAttributes: true 
-      });
-      
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) return;
-
-      const xpath = getXPathFromCursor(editor.document, editor.selection.active, parentTag, defaultOptions);
-      if (xpath) {
-        await vscode.env.clipboard.writeText(xpath);
-        vscode.window.showInformationMessage(`XPath copied: ${xpath}`);
-      } else {
-        vscode.window.showErrorMessage('Cannot compute XPath at current cursor position');
-      }
-    })
-  );
-
-  // Make status bar clickable for quick copy
-  statusBarItem.command = 'xmlXpath.copyXPathQuick';
-
-  // Initial update
-  updateXPath();
+  update();
 }
 
-function deactivate() {}
+function deactivate() {
+  if (statusBarItem) {
+    statusBarItem.dispose();
+  }
+}
+
+// State keys
+const PARENT_KEY = 'xmlXpath.parentTag';
+const MODE_KEY = 'xmlXpath.mode';
+const ATTRS_KEY = 'xmlXpath.preferredAttributes';
+const IGNORE_KEY = 'xmlXpath.ignoreIndexTags';
+
+// Command implementations
+async function setParent() {
+  const value = await vscode.window.showInputBox({ prompt: 'Parent tag for relative XPath (leave empty for full)' });
+  await vscode.workspace.getConfiguration().update(PARENT_KEY, value || null, vscode.ConfigurationTarget.Global);
+  update();
+}
+
+async function setMode() {
+  const options = [
+    { label: 'Both', value: { includeIndices: true, includeAttributes: true } },
+    { label: 'Attributes Only', value: { includeIndices: false, includeAttributes: true } },
+    { label: 'Indices Only', value: { includeIndices: true, includeAttributes: false } },
+    { label: 'Simple', value: { includeIndices: false, includeAttributes: false } }
+  ];
+  const pick = await vscode.window.showQuickPick(options, { placeHolder: 'Select XPath mode' });
+  if (pick) {
+    await vscode.workspace.getConfiguration().update(MODE_KEY, pick.value, vscode.ConfigurationTarget.Global);
+    update();
+  }
+}
+
+async function setPreferredAttrs() {
+  const current = vscode.workspace.getConfiguration().get(ATTRS_KEY, []);
+  const input = await vscode.window.showInputBox({ prompt: 'Preferred attributes (comma-separated)', value: current.join(',') });
+  if (input !== undefined) {
+    const list = input.split(',').map(s => s.trim()).filter(Boolean);
+    await vscode.workspace.getConfiguration().update(ATTRS_KEY, list, vscode.ConfigurationTarget.Global);
+    update();
+  }
+}
+
+async function setIgnoreTags() {
+  const current = vscode.workspace.getConfiguration().get(IGNORE_KEY, []);
+  const input = await vscode.window.showInputBox({ prompt: 'Tags to ignore index [1] (comma-separated)', value: current.join(',') });
+  if (input !== undefined) {
+    const list = input.split(',').map(s => s.trim()).filter(Boolean);
+    await vscode.workspace.getConfiguration().update(IGNORE_KEY, list, vscode.ConfigurationTarget.Global);
+    update();
+  }
+}
+
+async function copyXPath() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return;
+  const xpath = buildXPath(editor.document, editor.selection.active);
+  if (xpath) {
+    await vscode.env.clipboard.writeText(xpath);
+    vscode.window.showInformationMessage(`Copied XPath: ${xpath}`);
+  } else {
+    vscode.window.showErrorMessage('Unable to compute XPath.');
+  }
+}
+
+// Update status bar text
+function update() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return statusBarItem.hide();
+
+  const xpath = buildXPath(editor.document, editor.selection.active);
+  if (xpath) {
+    statusBarItem.text = `$(code) ${xpath}`;
+    statusBarItem.tooltip = 'Click to copy XPath';
+    statusBarItem.show();
+  } else {
+    statusBarItem.hide();
+  }
+}
+
+// Build XPath from document & position
+function buildXPath(document, position) {
+  const xml = document.getText();
+  const offset = document.offsetAt(position);
+
+  // Load settings
+  const cfg = vscode.workspace.getConfiguration();
+  const parentTag = cfg.get(PARENT_KEY, null);
+  const { includeIndices, includeAttributes } = cfg.get(MODE_KEY, { includeIndices: true, includeAttributes: true });
+  const preferred = cfg.get(ATTRS_KEY, []);
+  const ignoreTags = new Set(cfg.get(IGNORE_KEY, []));
+
+  // Tokenize
+  const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/)?>/g;
+  const events = [];
+  let m;
+  while ((m = tokenRegex.exec(xml))) {
+    const isClose = !!m[1];
+    const tag = m[2];
+    const attrsText = m[3] || '';
+    const selfClose = !!m[4];
+    const pos = m.index;
+    const attrs = {};
+    let customIndex;
+    attrsText.replace(/([\w:\-\.]+)\s*=\s*"([^\"]*)"/g, (_, k, v) => {
+      if (k === 'xlink:lable') {
+        const num = v.match(/(\d+)$/);
+        if (num) customIndex = Number(num[1]);
+      } else if (!k.startsWith('xmlns')) {
+        attrs[k] = v;
+      }
+    });
+
+    if (!isClose) {
+      events.push({ type: 'open', tag, attrs, pos, customIndex });
+      if (selfClose) events.push({ type: 'close', tag, pos });
+    } else {
+      events.push({ type: 'close', tag, pos });
+    }
+    if (pos > offset) break;
+  }
+
+  // Walk to offset
+  const stack = [];
+  const counters = [];
+  for (const ev of events) {
+    if (ev.pos > offset) break;
+    if (ev.type === 'open') {
+      const depth = stack.length;
+      counters[depth] = counters[depth] || {};
+      counters[depth][ev.tag] = (counters[depth][ev.tag] || 0) + 1;
+      const idx = counters[depth][ev.tag];
+
+      // pick attr
+      let pickName, pickVal;
+      for (const pref of preferred) {
+        if (ev.attrs[pref]) {
+          pickName = pref;
+          pickVal = ev.attrs[pref];
+          break;
+        }
+      }
+      if (!pickName) {
+        const first = Object.keys(ev.attrs)[0];
+        if (first) {
+          pickName = first;
+          pickVal = ev.attrs[first];
+        }
+      }
+
+      stack.push({ tag: ev.tag, idx, customIndex: ev.customIndex, attrName: pickName, attrValue: pickVal });
+    } else {
+      if (stack.length && stack[stack.length-1].tag === ev.tag) stack.pop();
+    }
+  }
+
+  // apply parentTag
+  let path = stack;
+  if (parentTag) {
+    const i = stack.findIndex(n => n.tag === parentTag);
+    if (i>=0) path = stack.slice(i);
+  }
+  if (!path.length) return null;
+
+  // build segments
+  const segments = path.map((n,i) => {
+    let s = n.tag;
+    if (includeAttributes && n.attrName && n.attrValue) {
+      s += `[@${n.attrName}='${n.attrValue}']`;
+    }
+    if (includeIndices && i>0) {
+      const ix = n.customIndex != null ? n.customIndex : n.idx;
+      if (!(ix===1 && ignoreTags.has(n.tag))) s += `[${ix}]`;
+    }
+    return s;
+  });
+  return '/' + segments.join('/');
+}
 
 module.exports = { activate, deactivate };

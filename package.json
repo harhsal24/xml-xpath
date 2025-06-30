@@ -11,14 +11,23 @@
   ],
   "activationEvents": [
     "onLanguage:xml",
-    "onCommand:xmlXpath.getFromCursor"
+    "onCommand:xmlXpath.getFromCursor",
+    "onCommand:xmlXpath.setParent",
+    "onCommand:xmlXpath.clearParent",
+    "onCommand:xmlXpath.setMode",
+    "onCommand:xmlXpath.setPreferredAttributes",
+    "onCommand:xmlXpath.setIgnoreIndexTags",
+    "onCommand:xmlXpath.copyXPath"
   ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
-       { "command": "xmlXpath.setParent", "title": "Set Parent Tag for XPath" },
-      { "command": "xmlXpath.copyXPath", "title": "Copy XPath from Cursor" },
-      { "command": "xmlXpath.clearParent", "title": "Clear Parent Tag" }
+      { "command": "xmlXpath.setParent", "title": "Set Parent Tag for XPath" },
+      { "command": "xmlXpath.clearParent", "title": "Clear Parent Tag" },
+      { "command": "xmlXpath.setMode", "title": "Set XPath Mode" },
+      { "command": "xmlXpath.setPreferredAttributes", "title": "Set Preferred Attributes" },
+      { "command": "xmlXpath.setIgnoreIndexTags", "title": "Set Ignore-Index Tags" },
+      { "command": "xmlXpath.copyXPath", "title": "Copy XPath from Cursor" }
     ],
     "keybindings": [
       {
@@ -26,7 +35,16 @@
         "command": "xmlXpath.copyXPath",
         "when": "editorTextFocus && editorLangId == xml"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "xmlXpath.copyXPath",
+          "when": "editorLangId == xml",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "devDependencies": {
     "vscode": "^1.1.37",
