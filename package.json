@@ -11,23 +11,40 @@
   ],
   "activationEvents": [
     "onLanguage:xml",
-    "onCommand:xmlXpath.getFromCursor",
+    "onCommand:xmlXpath.copyXPath",
     "onCommand:xmlXpath.setParent",
     "onCommand:xmlXpath.clearParent",
     "onCommand:xmlXpath.setMode",
     "onCommand:xmlXpath.setPreferredAttributes",
-    "onCommand:xmlXpath.setIgnoreIndexTags",
-    "onCommand:xmlXpath.copyXPath"
+    "onCommand:xmlXpath.setIgnoreIndexTags"
   ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
-      { "command": "xmlXpath.setParent", "title": "Set Parent Tag for XPath" },
-      { "command": "xmlXpath.clearParent", "title": "Clear Parent Tag" },
-      { "command": "xmlXpath.setMode", "title": "Set XPath Mode" },
-      { "command": "xmlXpath.setPreferredAttributes", "title": "Set Preferred Attributes" },
-      { "command": "xmlXpath.setIgnoreIndexTags", "title": "Set Ignore-Index Tags" },
-      { "command": "xmlXpath.copyXPath", "title": "Copy XPath from Cursor" }
+      {
+        "command": "xmlXpath.copyXPath",
+        "title": "Copy XPath from Cursor"
+      },
+      {
+        "command": "xmlXpath.setParent",
+        "title": "Set Parent Tag for XPath"
+      },
+      {
+        "command": "xmlXpath.clearParent",
+        "title": "Clear Parent Tag for XPath"
+      },
+      {
+        "command": "xmlXpath.setMode",
+        "title": "Set XPath Mode"
+      },
+      {
+        "command": "xmlXpath.setPreferredAttributes",
+        "title": "Set Preferred Attributes"
+      },
+      {
+        "command": "xmlXpath.setIgnoreIndexTags",
+        "title": "Set Ignore-Index Tags"
+      }
     ],
     "keybindings": [
       {
@@ -44,13 +61,43 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "XML XPath Extension",
+      "properties": {
+        "xmlXpath.parentTag": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Parent tag from which to generate relative XPath."
+        },
+        "xmlXpath.mode": {
+          "type": "object",
+          "default": {
+            "includeIndices": true,
+            "includeAttributes": true
+          },
+          "description": "XPath generation mode options."
+        },
+        "xmlXpath.preferredAttributes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["id", "name"],
+          "description": "Preferred attributes for XPath predicates."
+        },
+        "xmlXpath.ignoreIndexTags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Tags for which index [1] should be omitted in XPath."
+        }
+      }
     }
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.3"
   },
   "devDependencies": {
     "vscode": "^1.1.37",
     "vscode-test": "^1.4.0"
-  },
-  "dependencies": {
-    "fast-xml-parser": "^4.5.3"
   }
 }

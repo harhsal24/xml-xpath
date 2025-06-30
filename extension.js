@@ -1,5 +1,5 @@
 const vscode = require('vscode');
-
+const CONFIG_SECTION = 'xmlXpath';
 // Activation and deactivation
 let statusBarItem;
 function activate(context) {
@@ -70,13 +70,29 @@ async function setMode() {
 }
 
 async function setPreferredAttrs() {
-  const current = vscode.workspace.getConfiguration().get(ATTRS_KEY, []);
-  const input = await vscode.window.showInputBox({ prompt: 'Preferred attributes (comma-separated)', value: current.join(',') });
-  if (input !== undefined) {
-    const list = input.split(',').map(s => s.trim()).filter(Boolean);
-    await vscode.workspace.getConfiguration().update(ATTRS_KEY, list, vscode.ConfigurationTarget.Global);
-    update();
+  // Grab the xmlXpath.* configuration object
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  // Read the current list (so we can pre‑populate the input box)
+  const current = cfg.get('preferredAttributes', []);
+  // Ask the user for a comma‑separated list
+  const input = await vscode.window.showInputBox({
+    prompt: 'Preferred attributes (comma-separated, e.g. id,name,class)',
+    value: current.join(',')
+  });
+  if (input === undefined) {
+    // user cancelled
+    return;
   }
+   // Build the array and persist under xmlXpath.preferredAttributes
+  const list = input
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  await cfg.update('preferredAttributes', list, vscode.ConfigurationTarget.Global);
+
+  vscode.window.showInformationMessage(`Preferred attributes set to: ${list.join(', ')}`);
+  update();  // refresh the status bar
 }
 
 async function setIgnoreTags() {
