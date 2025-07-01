@@ -32,12 +32,31 @@ function activate(context) {
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor(update)
   );
+  context.subscriptions.push(vscode.commands.registerCommand('xmlXpath.toggleDisableLeafIndex', toggleDisableLeafIndex));
+  context.subscriptions.push(vscode.commands.registerCommand('xmlXpath.toggleSkipSingleIndex', toggleSkipSingleIndex));
 
   update();
 }
 
+
 function deactivate() {
   if (statusBarItem) statusBarItem.dispose();
+}
+
+async function toggleDisableLeafIndex() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get('disableLeafIndex', false);
+  await cfg.update('disableLeafIndex', !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`disableLeafIndex: ${!current}`);
+  update();
+}
+
+async function toggleSkipSingleIndex() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get('skipSingleIndex', false);
+  await cfg.update('skipSingleIndex', !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`skipSingleIndex: ${!current}`);
+  update();
 }
 
 // Commands
@@ -120,9 +139,10 @@ function update() {
   if (!editor) return statusBarItem.hide();
   const xpath = buildXPath(editor.document, editor.selection.active);
   if (xpath) {
-    statusBarItem.text = `$(code) ${xpath}`;
-    statusBarItem.tooltip = 'Click to copy XPath';
-    statusBarItem.show();
+        statusBarItem.text = `$(code) ${xpath}`;
+    // show the full path on hover
+    statusBarItem.tooltip = xpath;
+   statusBarItem.show();
   } else {
     statusBarItem.hide();
   }
@@ -132,24 +152,28 @@ function buildXPath(document, position) {
   const xml = document.getText();
   const offset = document.offsetAt(position);
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const parentTag = cfg.get('parentTag', null);
+  const parentTag        = cfg.get('parentTag', null);
   const { includeIndices, includeAttributes } = cfg.get('mode', { includeIndices: true, includeAttributes: true });
-  const preferred = cfg.get('preferredAttributes', []);
-  const ignoreTags = new Set(cfg.get('ignoreIndexTags', []));
-  const tpl = includeAttributes ? cfg.get('predicateTemplate', "[@{attr1}='{attr1V}']") : null;
+  const preferred        = cfg.get('preferredAttributes', []);
+  const ignoreTags       = new Set(cfg.get('ignoreIndexTags', []));
+  const tpl              = includeAttributes ? cfg.get('predicateTemplate', "[@{attr1}='{attr1V}']") : null;
+  const disableLeafIndex = cfg.get('disableLeafIndex', false);
+  const skipSingleIndex  = cfg.get('skipSingleIndex', false);
 
+  // tokenize up to cursor
   const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
   const events = [];
   let m;
   while ((m = tokenRegex.exec(xml))) {
-    const isClose = !!m[1];
-    const tag = m[2];
-    const attrsText = m[3] || '';
-    const selfClose = !!m[4];
-    const pos = m.index;
-    const attrs = {};
+    const isClose     = !!m[1];
+    const tag         = m[2];
+    const attrsText   = m[3] || '';
+    const selfClose   = !!m[4];
+    const pos         = m.index;
+    const attrs       = {};
     let customIndex, customIndexRaw;
-    attrsText.replace(/([\w:\-\.]+)\s*=\s*"([^\"]*)"/g, (_, k, v) => {
+
+    attrsText.replace(/([\w:\-\.]+)\s*=\s*"([^"]*)"/g, (_, k, v) => {
       if (k === 'xlink:lable') {
         customIndexRaw = v;
         const num = v.match(/(\d+)$/);
@@ -158,6 +182,7 @@ function buildXPath(document, position) {
         attrs[k] = v;
       }
     });
+
     if (!isClose) {
       events.push({ type: 'open', tag, attrs, pos, customIndex, customIndexRaw });
       if (selfClose) events.push({ type: 'close', tag, pos });
@@ -167,6 +192,7 @@ function buildXPath(document, position) {
     if (pos > offset) break;
   }
 
+  // build stack + counters
   const stack = [];
   const counters = [];
   for (const ev of events) {
@@ -186,11 +212,12 @@ function buildXPath(document, position) {
         }
       }
       stack.push({ tag: ev.tag, idx, customIndex: ev.customIndex, customIndexRaw: ev.customIndexRaw, attrName: pickName, attrValue: pickVal });
-    } else if (stack.length && stack[stack.length-1].tag === ev.tag) {
+    } else if (stack.length && stack[stack.length - 1].tag === ev.tag) {
       stack.pop();
     }
   }
 
+  // apply parentTag slicing
   let path = stack;
   if (parentTag) {
     const i = stack.findIndex(n => n.tag === parentTag);
@@ -198,29 +225,45 @@ function buildXPath(document, position) {
   }
   if (!path.length) return null;
 
-  const segments = path.map((n, i) => {
-    let s = n.tag;
-    if (tpl && n.attrName && n.attrValue) {
-      const data = {
-        tag: n.tag,
-        attr1: n.attrName,
-        attr1V: n.attrValue,
-        xllv: n.customIndexRaw || '',
-        xllvI: n.customIndex != null ? n.customIndex : '',
-        idx: n.idx
-      };
-      s += tpl.replace(/\{(\w+)\}/g, (_, key) => data[key] || '');
-    } else if (includeAttributes && n.attrName && n.attrValue) {
-      s += `[@${n.attrName}='${n.attrValue}']`;
-    }
-    if (includeIndices && i > 0) {
-      const ix = n.customIndex != null ? n.customIndex : n.idx;
-      if (!(ix === 1 && ignoreTags.has(n.tag))) s += `[${ix}]`;
-    }
-    return s;
-  });
+  // build segments
+  return '/'
+    + path
+        .map((n, i) => {
+          const isLeaf = i === path.length - 1;
+          let s = n.tag;
 
-  return '/' + segments.join('/');
+          // attributes-based predicates
+          if (tpl && n.attrName && n.attrValue) {
+            const data = {
+              tag: n.tag,
+              attr1: n.attrName,
+              attr1V: n.attrValue,
+              xllv: n.customIndexRaw || '',
+              xllvI: n.customIndex != null ? n.customIndex : '',
+              idx: n.idx
+            };
+            s += tpl.replace(/\{(\w+)\}/g, (_, key) => data[key] || '');
+          } else if (includeAttributes && n.attrName && n.attrValue) {
+            s += `[@${n.attrName}='${n.attrValue}']`;
+          }
+
+          if (!(disableLeafIndex && isLeaf) && includeIndices) {
+            let ix = n.customIndex != null ? n.customIndex : n.idx;
+            // **always** treat the leaf’s index as 1
+            if (isLeaf) ix = 1;
+
+            // only render the index if it’s not a “skip [1]” case
+            if (!(skipSingleIndex && ix === 1) && !(ix === 1 && ignoreTags.has(n.tag))) {
+              s += `[${ix}]`;
+            }
+          }
+
+          return s;
+        })
+        .join('/');
 }
 
 module.exports = { activate, deactivate };
+
+
+  

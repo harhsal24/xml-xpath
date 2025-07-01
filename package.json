@@ -16,7 +16,9 @@
     "onCommand:xmlXpath.clearParent",
     "onCommand:xmlXpath.setMode",
     "onCommand:xmlXpath.setPreferredAttributes",
-    "onCommand:xmlXpath.setIgnoreIndexTags"
+    "onCommand:xmlXpath.setIgnoreIndexTags",
+       "onCommand:xmlXpath.toggleDisableLeafIndex",
+    "onCommand:xmlXpath.toggleSkipSingleIndex"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -49,7 +51,15 @@
       "command": "xmlXpath.setTemplate",
       "title": "Set Predicate Template",
       "category": "XML XPath"
-    }
+    },
+     {
+        "command": "xmlXpath.toggleDisableLeafIndex",
+        "title": "XML XPath: Toggle Disable Leaf Index"
+      },
+      {
+        "command": "xmlXpath.toggleSkipSingleIndex",
+        "title": "XML XPath: Toggle Skip Single Index"
+      }
     ],
     "keybindings": [
       {
@@ -64,7 +74,9 @@
           "command": "xmlXpath.copyXPath",
           "when": "editorLangId == xml",
           "group": "navigation"
-        }
+        },
+         { "command": "xmlXpath.toggleDisableLeafIndex",  "when": "editorTextFocus" },
+       { "command": "xmlXpath.toggleSkipSingleIndex",   "when": "editorTextFocus" }
       ]
     },
     "configuration": {
@@ -99,6 +111,16 @@
           "type": "string",
           "default": "[@{attr1}='{attr1V}']",
           "description": "Template for predicate rendering. Tokens: {tag}, {attr1}, {attr1V}, {xllv}, {xllvI}, {idx}."
+        },
+        "xmlXpath.disableLeafIndex": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, omit the [n] index on the final (leaf) segment of the XPath."
+        },
+        "xmlXpath.skipSingleIndex": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, omit all [1] indexes (i.e. when an element is the only child of its tag at that level)."
         }
       }
     }
