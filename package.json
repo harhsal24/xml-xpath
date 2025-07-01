@@ -17,7 +17,7 @@
     "onCommand:xmlXpath.setMode",
     "onCommand:xmlXpath.setPreferredAttributes",
     "onCommand:xmlXpath.setIgnoreIndexTags",
-       "onCommand:xmlXpath.toggleDisableLeafIndex",
+    "onCommand:xmlXpath.toggleDisableLeafIndex",
     "onCommand:xmlXpath.toggleSkipSingleIndex"
   ],
   "main": "./extension.js",
@@ -47,12 +47,12 @@
         "command": "xmlXpath.setIgnoreIndexTags",
         "title": "Set Ignore-Index Tags"
       },
-       {
-      "command": "xmlXpath.setTemplate",
-      "title": "Set Predicate Template",
-      "category": "XML XPath"
-    },
-     {
+      {
+        "command": "xmlXpath.setTemplate",
+        "title": "Set Predicate Template",
+        "category": "XML XPath"
+      },
+      {
         "command": "xmlXpath.toggleDisableLeafIndex",
         "title": "XML XPath: Toggle Disable Leaf Index"
       },
@@ -75,15 +75,24 @@
           "when": "editorLangId == xml",
           "group": "navigation"
         },
-         { "command": "xmlXpath.toggleDisableLeafIndex",  "when": "editorTextFocus" },
-       { "command": "xmlXpath.toggleSkipSingleIndex",   "when": "editorTextFocus" }
+        {
+          "command": "xmlXpath.toggleDisableLeafIndex",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "xmlXpath.toggleSkipSingleIndex",
+          "when": "editorTextFocus"
+        }
       ]
     },
     "configuration": {
       "title": "XML XPath Extension",
       "properties": {
         "xmlXpath.parentTag": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null,
           "description": "Parent tag from which to generate relative XPath."
         },
@@ -97,13 +106,20 @@
         },
         "xmlXpath.preferredAttributes": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["id", "name"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "id",
+            "name"
+          ],
           "description": "Preferred attributes for XPath predicates."
         },
         "xmlXpath.ignoreIndexTags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Tags for which index [1] should be omitted in XPath."
         },
