@@ -31,10 +31,10 @@
         "command": "xmlXpath.setParent",
         "title": "Set Parent Tag for XPath"
       },
-      {
-        "command": "xmlXpath.clearParent",
-        "title": "Clear Parent Tag for XPath"
-      },
+       {
+      "command": "xmlXpath.clearParent",
+      "title": "Clear Parent Tag for XPath"
+    },
       {
         "command": "xmlXpath.setMode",
         "title": "Set XPath Mode"

@@ -401,6 +401,7 @@ function activate(context) {
 function registerCommands(context) {
   const commands = [
     ['xmlXpath.setParent', setParent],
+     ['xmlXpath.clearParent', clearParent],
     ['xmlXpath.setMode', setMode],
     ['xmlXpath.setPreferredAttributes', setPreferredAttrs],
     ['xmlXpath.setIgnoreIndexTags', setIgnoreTags],
@@ -459,6 +460,13 @@ async function setParent() {
     await vscode.workspace.getConfiguration(CONFIG_SECTION).update('parentTag', value || null, vscode.ConfigurationTarget.Global);
     update();
   }
+}
+
+async function clearParent() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  await cfg.update('parentTag', null, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage('Parent tag cleared — now generating full absolute XPaths.');
+  update();  // refresh the status bar
 }
 
 async function setMode() {
