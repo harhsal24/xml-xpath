@@ -18,39 +18,41 @@
     "onCommand:xmlXpath.setPreferredAttributes",
     "onCommand:xmlXpath.setIgnoreIndexTags",
     "onCommand:xmlXpath.toggleDisableLeafIndex",
-    "onCommand:xmlXpath.toggleSkipSingleIndex"
+    "onCommand:xmlXpath.toggleSkipSingleIndex",
+    "onCommand:xmlXpath.toggleUseXlinkLabelIndex",
+    "onCommand:xmlXpath.toggleParentScopedIndexing",
+    "onCommand:xmlXpath.toggleIgnoreParentSegment"
   ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
       {
         "command": "xmlXpath.copyXPath",
-        "title": "Copy XPath from Cursor"
+        "title": "XML XPath: Copy XPath from Cursor"
       },
       {
         "command": "xmlXpath.setParent",
-        "title": "Set Parent Tag for XPath"
+        "title": "XML XPath: Set Parent Tag"
       },
-       {
-      "command": "xmlXpath.clearParent",
-      "title": "Clear Parent Tag for XPath"
-    },
+      {
+        "command": "xmlXpath.clearParent",
+        "title": "XML XPath: Clear Parent Tag"
+      },
       {
         "command": "xmlXpath.setMode",
-        "title": "Set XPath Mode"
+        "title": "XML XPath: Set XPath Mode"
       },
       {
         "command": "xmlXpath.setPreferredAttributes",
-        "title": "Set Preferred Attributes"
+        "title": "XML XPath: Set Preferred Attributes"
       },
       {
         "command": "xmlXpath.setIgnoreIndexTags",
-        "title": "Set Ignore-Index Tags"
+        "title": "XML XPath: Set Ignore-Index Tags"
       },
       {
         "command": "xmlXpath.setTemplate",
-        "title": "Set Predicate Template",
-        "category": "XML XPath"
+        "title": "XML XPath: Set Predicate Template"
       },
       {
         "command": "xmlXpath.toggleDisableLeafIndex",
@@ -59,6 +61,18 @@
       {
         "command": "xmlXpath.toggleSkipSingleIndex",
         "title": "XML XPath: Toggle Skip Single Index"
+      },
+      {
+        "command": "xmlXpath.toggleUseXlinkLabelIndex",
+        "title": "XML XPath: Toggle Use XLink Label Index"
+      },
+      {
+        "command": "xmlXpath.toggleParentScopedIndexing",
+        "title": "XML XPath: Toggle Parent-Scoped Indexing"
+      },
+      {
+        "command": "xmlXpath.toggleIgnoreParentSegment",
+        "title": "XML XPath: Toggle Ignore Parent Segment"
       }
     ],
     "keybindings": [
@@ -82,6 +96,11 @@
         {
           "command": "xmlXpath.toggleSkipSingleIndex",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "xmlXpath.toggleUseXlinkLabelIndex",
+          "when": "editorTextFocus",
+          "group": "navigation"
         }
       ]
     },
@@ -110,8 +129,7 @@
             "type": "string"
           },
           "default": [
-            "id",
-            "name"
+
           ],
           "description": "Preferred attributes for XPath predicates."
         },
@@ -137,6 +155,21 @@
           "type": "boolean",
           "default": false,
           "description": "If true, omit all [1] indexes (i.e. when an element is the only child of its tag at that level)."
+        },
+        "xmlXpath.useXlinkLabelIndex": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, use the numeric suffix parsed from xlink:label as the element index instead of the simple occurrence count."
+        },
+        "xmlXpath.useParentScopedIndices": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, reset child‑counters per parent; otherwise use global‑depth counters."
+        },
+        "xmlXpath.ignoreParentSegment": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, omit the parentTag itself from the generated XPath, showing only the descendant path."
         }
       }
     }
