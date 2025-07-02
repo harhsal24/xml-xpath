@@ -28,51 +28,63 @@
     "commands": [
       {
         "command": "xmlXpath.copyXPath",
-        "title": "XML XPath: Copy XPath from Cursor"
+        "title": "XML XPath: Copy XPath from Cursor",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.setParent",
-        "title": "XML XPath: Set Parent Tag"
+        "title": "XML XPath: Set Parent Tag",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.clearParent",
-        "title": "XML XPath: Clear Parent Tag"
+        "title": "XML XPath: Clear Parent Tag",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.setMode",
-        "title": "XML XPath: Set XPath Mode"
+        "title": "XML XPath: Set XPath Mode",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.setPreferredAttributes",
-        "title": "XML XPath: Set Preferred Attributes"
+        "title": "XML XPath: Set Preferred Attributes",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.setIgnoreIndexTags",
-        "title": "XML XPath: Set Ignore-Index Tags"
+        "title": "XML XPath: Set Ignore-Index Tags",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.setTemplate",
-        "title": "XML XPath: Set Predicate Template"
+        "title": "XML XPath: Set Predicate Template",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.toggleDisableLeafIndex",
-        "title": "XML XPath: Toggle Disable Leaf Index"
+        "title": "XML XPath: Toggle Disable Leaf Index",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.toggleSkipSingleIndex",
-        "title": "XML XPath: Toggle Skip Single Index"
+        "title": "XML XPath: Toggle Skip Single Index",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.toggleUseXlinkLabelIndex",
-        "title": "XML XPath: Toggle Use XLink Label Index"
+        "title": "XML XPath: Toggle Use XLink Label Index",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.toggleParentScopedIndexing",
-        "title": "XML XPath: Toggle Parent-Scoped Indexing"
+        "title": "XML XPath: Toggle Parent-Scoped Indexing",
+        "category": "XML XPath"
       },
       {
         "command": "xmlXpath.toggleIgnoreParentSegment",
-        "title": "XML XPath: Toggle Ignore Parent Segment"
+        "title": "XML XPath: Toggle Ignore Parent Segment",
+        "category": "XML XPath"
       }
     ],
     "keybindings": [
@@ -83,27 +95,31 @@
       }
     ],
     "menus": {
-      "editor/context": [
-        {
-          "command": "xmlXpath.copyXPath",
-          "when": "editorLangId == xml",
-          "group": "navigation"
-        },
-        {
-          "command": "xmlXpath.toggleDisableLeafIndex",
-          "when": "editorTextFocus"
-        },
-        {
-          "command": "xmlXpath.toggleSkipSingleIndex",
-          "when": "editorTextFocus"
-        },
-        {
-          "command": "xmlXpath.toggleUseXlinkLabelIndex",
-          "when": "editorTextFocus",
-          "group": "navigation"
-        }
-      ]
+  "editor/context": [
+    {
+      "command": "xmlXpath.copyXPath",
+      "when": "editorLangId == xml",
+      "group": "xmlXpath"
+
     },
+    {
+      "command": "xmlXpath.toggleDisableLeafIndex",
+      "when": "editorTextFocus",
+      "group": "xmlXpath"
+    },
+    {
+      "command": "xmlXpath.toggleSkipSingleIndex",
+      "when": "editorTextFocus",
+      "group": "xmlXpath"
+    },
+    {
+      "command": "xmlXpath.toggleUseXlinkLabelIndex",
+      "when": "editorTextFocus",
+      "group": "xmlXpath"
+    }
+  ]
+}
+,
     "configuration": {
       "title": "XML XPath Extension",
       "properties": {
