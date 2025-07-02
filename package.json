@@ -1,7 +1,7 @@
 {
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
-  "publisher": "HB",
+  "publisher": "HB24",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.50.0"
