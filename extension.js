@@ -1,997 +1,210 @@
+// ========== File: extension.js ==========
+
 const vscode = require("vscode");
-const { XMLParser } = require("fast-xml-parser");
+const XPathBuilder = require("./XPathBuilder.js");
 
 const CONFIG_SECTION = "xmlXpath";
 let statusBarItem;
 
-// Optimized parser configuration
-const parserOptions = {
-  ignoreAttributes: false,
-  preserveOrder: true,
-  trimValues: false,
-  parseAttributeValue: false,
-  ignoreNameSpace: false,
-  allowBooleanAttributes: true,
-  parseNodeValue: false,
-  parseTagValue: false,
-  parseTrueNumberOnly: false,
-};
-
-class XPathBuilder {
-  constructor() {
-    this.parser = new XMLParser(parserOptions);
-    this.cache = new Map();
-  }
-
-  // Get or create cached document structure
-  getDocumentStructure(document) {
-    const uri = document.uri.toString();
-    const version = document.version;
-
-    if (this.cache.has(uri)) {
-      const cached = this.cache.get(uri);
-      if (cached.version === version) {
-        return cached.structure;
-      }
-    }
-
-    try {
-      const text = document.getText();
-
-      // For very large documents, use regex fallback
-      if (text.length > 500000) {
-        // 500KB threshold
-        console.log("Document too large, using regex fallback");
-        return null; // Will trigger regex fallback
-      }
-
-      // For moderately large documents, try partial parsing
-      if (text.length > 100000) {
-        // 100KB threshold
-        return this.parsePartialDocument(document, text);
-      }
-
-      // For smaller documents, parse fully
-      const structure = this.parseFullDocument(text);
-      this.cache.set(uri, { version, structure });
-      return structure;
-    } catch (error) {
-      console.error("XML parsing error:", error);
-      return null; // Will trigger regex fallback
-    }
-  }
-
-  parseFullDocument(xmlText) {
-    try {
-      // Clean XML before parsing
-      const cleanXml = this.preprocessXml(xmlText);
-      const parsed = this.parser.parse(cleanXml);
-
-      return {
-        type: "full",
-        structure: parsed,
-        originalText: xmlText,
-      };
-    } catch (error) {
-      console.error("Full document parsing failed:", error);
-      throw error;
-    }
-  }
-
-  parsePartialDocument(document, xmlText) {
-    const position = vscode.window.activeTextEditor?.selection.active;
-    if (!position) return null;
-
-    const offset = document.offsetAt(position);
-
-    try {
-      // Extract a reasonable window around the cursor
-      const windowSize = 50000; // 50KB window
-      const start = Math.max(0, offset - windowSize / 2);
-      const end = Math.min(xmlText.length, offset + windowSize / 2);
-
-      // Find complete XML section
-      const partialXml = this.extractCompleteXmlSection(xmlText, start, end);
-
-      if (!partialXml) {
-        throw new Error("Could not extract valid XML section");
-      }
-
-      const cleanXml = this.preprocessXml(partialXml.xml);
-      const parsed = this.parser.parse(cleanXml);
-
-      return {
-        type: "partial",
-        startOffset: partialXml.startOffset,
-        structure: parsed,
-        cursorOffset: offset - partialXml.startOffset,
-        originalText: xmlText,
-      };
-    } catch (error) {
-      console.error("Partial parsing failed:", error);
-      throw error;
-    }
-  }
-
-  extractCompleteXmlSection(xmlText, start, end) {
-    // Find the nearest complete XML elements around the cursor
-    let tagStart = start;
-    let tagEnd = end;
-    let openTags = [];
-
-    // Move backwards to find a reasonable starting point
-    while (tagStart > 0) {
-      if (xmlText[tagStart] === "<" && xmlText[tagStart + 1] !== "/") {
-        // Found opening tag, let's use this as start
-        break;
-      }
-      tagStart--;
-    }
-
-    // Move forward to find matching closing tags
-    let pos = tagStart;
-    while (pos < xmlText.length && pos < end + 10000) {
-      // Safety limit
-      const match = xmlText.substring(pos).match(/<(\/?)([\w:\-\.]+)[^>]*>/);
-      if (!match) break;
-
-      const isClosing = match[1] === "/";
-      const tagName = match[2];
-      const fullMatch = match[0];
-
-      if (!isClosing && !fullMatch.endsWith("/>")) {
-        openTags.push(tagName);
-      } else if (isClosing && openTags.length > 0) {
-        const lastTag = openTags[openTags.length - 1];
-        if (lastTag === tagName) {
-          openTags.pop();
-          if (openTags.length === 0 && pos > end) {
-            // Found balanced XML section
-            tagEnd = pos + fullMatch.length;
-            break;
-          }
-        }
-      }
-
-      pos += match.index + fullMatch.length;
-    }
-
-    if (tagStart >= tagEnd) {
-      return null;
-    }
-
-    const fragment = xmlText.substring(tagStart, tagEnd);
-    return {
-      xml: fragment,
-      startOffset: tagStart,
-    };
-  }
-
-  preprocessXml(xmlText) {
-    // Remove XML declaration if present
-    let cleaned = xmlText.replace(/<\?xml[^>]*\?>/i, "");
-
-    // Remove comments
-    cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, "");
-
-    // Handle CDATA sections (preserve content but escape it)
-    cleaned = cleaned.replace(
-      /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-      (match, content) => {
-        return this.escapeXml(content);
-      }
-    );
-
-    // Remove DOCTYPE declarations
-    cleaned = cleaned.replace(/<!DOCTYPE[^>]*>/i, "");
-
-    return cleaned.trim();
-  }
-
-  escapeXml(text) {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
-  }
-
-  buildXPath(document, position) {
-    const structure = this.getDocumentStructure(document);
-
-    // If parsing failed or document is too large, fall back to regex
-    if (!structure) {
-      return this.buildXPathRegex(document, position); // Make sure both parameters are passed
-    }
-
-    const offset = document.offsetAt(position);
-
-    // For now, we'll still use the regex approach as the main XPath builder
-    return this.buildXPathRegex(document, position); // Make sure both parameters are passed
-  }
-
-  // To make sure it has both parameters:
-  buildXPathRegex(document, position) {
-    const xml = document.getText();
-    const offset = document.offsetAt(position);
-    const config = this.loadConfiguration();
-
-    // Tokenize XML
-    const events = this.tokenizeXML(xml, offset, config);
-    if (!events) return null;
-
-    // Build element stack with indices
-    const stackResult = this.buildElementStack(events, offset, config);
-    if (!stackResult || !stackResult.stack.length) return null;
-
-    // Process path based on configuration
-    const path = this.processPath(stackResult.stack, config);
-    if (!path.length) return null;
-
-    // Generate XPath string
-    return this.generateXPath(path, config);
-  }
-
-  /**
-   * Load configuration settings
-   */
-  loadConfiguration() {
-    const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-    return {
-      parentTag: cfg.get("parentTag", null),
-      mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
-      preferredAttributes: cfg.get("preferredAttributes", []),
-      ignoreTags: new Set(cfg.get("ignoreIndexTags", [])),
-      predicateTemplate: cfg.get("mode", {}).includeAttributes
-        ? cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']")
-        : null,
-      disableLeafIndex: cfg.get("disableLeafIndex", false),
-      skipSingleIndex: cfg.get("skipSingleIndex", false),
-      useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", false),
-      useParentScopedIndices: cfg.get("useParentScopedIndices", false),
-      ignoreParentSegment: cfg.get("ignoreParentSegment", false),
-      maxParseSize: cfg.get("maxParseSize", 1000000), // 1MB default
-    };
-  }
-
-  /**
-   * Tokenize XML into events
-   */
-  tokenizeXML(xml, offset, config) {
-    // Use the preprocessing method
-    const cleanedXml = this.preprocessForTokenization(xml);
-
-    const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
-    const events = [];
-    let match;
-
-    // For very large documents, use a different strategy
-    const useFullParse =
-      !config || xml.length <= (config.maxParseSize || 1000000);
-
-    try {
-      while ((match = tokenRegex.exec(cleanedXml))) {
-        const event = this.parseXMLToken(match);
-        if (event) {
-          events.push(event);
-
-          // Add close event for self-closing tags
-          if (event.type === "open" && event.selfClose) {
-            events.push({ type: "close", tag: event.tag, pos: event.pos });
-          }
-        }
-
-        // For large documents, stop after parsing enough context
-        if (!useFullParse && match.index > offset + 50000) {
-          break;
-        }
-      }
-      return events;
-    } catch (error) {
-      console.error("XML tokenization error:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Preprocess XML for tokenization (remove CDATA, comments, and other non-element content)
-   */
-  preprocessForTokenization(xml) {
-    let processed = xml;
-
-    // Handle CDATA sections using string operations
-    let cdataStart = processed.indexOf("<![CDATA[");
-    while (cdataStart !== -1) {
-      const cdataEnd = processed.indexOf("]]>", cdataStart);
-      if (cdataEnd !== -1) {
-        const cdataLength = cdataEnd + 3 - cdataStart;
-        processed =
-          processed.substring(0, cdataStart) +
-          " ".repeat(cdataLength) +
-          processed.substring(cdataEnd + 3);
-      }
-      cdataStart = processed.indexOf("<![CDATA[", cdataStart + 1);
-    }
-
-    // Handle comments using string operations
-    let commentStart = processed.indexOf("<!--");
-    while (commentStart !== -1) {
-      const commentEnd = processed.indexOf("-->", commentStart);
-      if (commentEnd !== -1) {
-        const commentLength = commentEnd + 3 - commentStart;
-        processed =
-          processed.substring(0, commentStart) +
-          " ".repeat(commentLength) +
-          processed.substring(commentEnd + 3);
-      }
-      commentStart = processed.indexOf("<!--", commentStart + 1);
-    }
-
-    // Remove XML declarations
-    processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => {
-      return " ".repeat(match.length);
-    });
-
-    // Remove DOCTYPE declarations
-    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => {
-      return " ".repeat(match.length);
-    });
-
-    // Remove processing instructions
-    processed = processed.replace(/<\?[^>]*\?>/g, (match) => {
-      return " ".repeat(match.length);
-    });
-
-    return processed;
-  }
-
-  /**
-   * Create offset mapping for preprocessed XML
-   */
-  createOffsetMap(original, processed) {
-    const map = new Map();
-    let offset = 0;
-
-    for (let i = 0; i < processed.length; i++) {
-      if (processed[i] !== " " || original[i] !== " ") {
-        map.set(i, i + offset);
-      }
-    }
-
-    return map;
-  }
-
-  /**
-   * Parse a single XML token match
-   */
-  parseXMLToken(match) {
-    const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
-    const isClose = !!closeSlash;
-    const selfClose = !!selfCloseSlash;
-    const pos = match.index;
-
-    if (isClose) {
-      return { type: "close", tag, pos };
-    }
-
-    const attrs = this.parseAttributes(attrsText || "");
-    const xlinkData = this.parseXlinkLabel(attrs);
-
-    return {
-      type: "open",
-      tag,
-      attrs: attrs.regular,
-      pos,
-      selfClose,
-      ...xlinkData,
-    };
-  }
-
-  /**
-   * Parse attributes from attribute text
-   */
-  parseAttributes(attrsText) {
-    const regular = {};
-    let xlinkLabel = null;
-
-    attrsText.replace(
-      /([\w:\-\.]+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*)(?:\2)/g,
-      (_, key, _quote, value) => {
-        if (key === "xlink:label") {
-          xlinkLabel = value;
-        } else if (!key.startsWith("xmlns")) {
-          regular[key] = value;
-        }
-      }
-    );
-
-    return { regular, xlinkLabel };
-  }
-
-  /**
-   * Parse xlink:label for custom indexing
-   */
-  parseXlinkLabel(attrs) {
-    if (!attrs.xlinkLabel) {
-      return { customIndex: undefined, customIndexRaw: undefined };
-    }
-
-    const customIndexRaw = attrs.xlinkLabel;
-    const numMatch = customIndexRaw.match(/(\d+)$/);
-    const customIndex = numMatch ? parseInt(numMatch[1], 10) : undefined;
-
-    return { customIndex, customIndexRaw };
-  }
-
-
-/**
- * Build element stack with proper indexing, respecting the parent-scoped configuration.
- */
-buildElementStack(events, offset, config) {
-    const currentStack = [];
-    // The type of counter we use depends on the configuration.
-    const counters = config.useParentScopedIndices ? {} : [];
-    let targetStack = null;
-
-    for (const event of events) {
-        if (event.pos > offset && targetStack) {
-            break; // Optimization: we've found our target
-        }
-
-        if (event.type === "open") {
-            let idx;
-
-            // *** THIS IS THE CRITICAL LOGIC SWITCH ***
-            if (config.useParentScopedIndices) {
-                // CORRECT PARENT-SCOPED LOGIC
-                // THIS IS THE LINE THAT WAS FIXED:
-                const parentPath = currentStack.map(e => `${e.tag}[${e.idx}]`).join('/');
-
-                if (!counters[parentPath]) {
-                    counters[parentPath] = {};
-                }
-                const tagCounter = counters[parentPath];
-                tagCounter[event.tag] = (tagCounter[event.tag] || 0) + 1;
-                idx = tagCounter[event.tag];
-            } else {
-                // ORIGINAL GLOBAL (DEPTH-BASED) LOGIC
-                const depth = currentStack.length;
-                if (!counters[depth]) {
-                    counters[depth] = {};
-                }
-                counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-                idx = counters[depth][event.tag];
-            }
-
-            const { attrName, attrValue } = this.selectPreferredAttribute(
-                event.attrs,
-                config.preferredAttributes
-            );
-
-            const element = {
-                tag: event.tag,
-                idx, // Use the correctly calculated index
-                customIndex: event.customIndex,
-                customIndexRaw: event.customIndexRaw,
-                attrName,
-                attrValue,
-                startPos: event.pos
-            };
-            
-            currentStack.push(element);
-
-        } else if (event.type === "close") {
-            if (currentStack.length > 0 && currentStack[currentStack.length - 1].tag === event.tag) {
-                const openingElement = currentStack[currentStack.length - 1];
-                
-                if (!targetStack && openingElement.startPos <= offset && event.pos >= offset) {
-                    targetStack = [...currentStack];
-                }
-                
-                currentStack.pop();
-            }
-        }
-    }
-
-    return { stack: targetStack || currentStack };
-}
-
-  /**
-   * Create counters based on indexing mode
-   */
-  createCounters(useParentScoped) {
-    return useParentScoped ? {} : [];
-  }
-
-  /**
-   * Process an opening tag
-   */
-  processOpenTag(event, stack, counters, config) {
-    const depth = stack.length;
-    const idx = this.calculateIndex(
-      event.tag,
-      depth,
-      counters,
-      config.useParentScopedIndices
-    );
-
-    const { attrName, attrValue } = this.selectPreferredAttribute(
-      event.attrs,
-      config.preferredAttributes
-    );
-
-    return {
-      tag: event.tag,
-      idx,
-      customIndex: event.customIndex,
-      customIndexRaw: event.customIndexRaw,
-      attrName,
-      attrValue,
-    };
-  }
-
-  /**
-   * Calculate element index
-   */
-  calculateIndex(tag, depth, counters, useParentScoped) {
-    if (useParentScoped) {
-      counters[depth] = counters[depth] || {};
-      counters[depth][tag] = (counters[depth][tag] || 0) + 1;
-      return counters[depth][tag];
-    } else {
-      counters[depth] = counters[depth] || {};
-      counters[depth][tag] = (counters[depth][tag] || 0) + 1;
-      return counters[depth][tag];
-    }
-  }
-
-  /**
-   * Select preferred attribute for predicates
-   */
-  selectPreferredAttribute(attrs, preferredList) {
-    for (const preferred of preferredList) {
-      if (attrs[preferred]) {
-        return { attrName: preferred, attrValue: attrs[preferred] };
-      }
-    }
-    return { attrName: null, attrValue: null };
-  }
-
-  /**
-   * Process a closing tag
-   */
-  processCloseTag(event, stack, counters, config) {
-    if (stack.length && stack[stack.length - 1].tag === event.tag) {
-      stack.pop();
-      if (config.useParentScopedIndices) {
-        delete counters[stack.length];
-      }
-    }
-  }
-
-  /**
-   * Process path based on parent tag configuration
-   */
-  processPath(stack, config) {
-    let path = stack;
-
-    if (config.parentTag) {
-      const parentIndex = stack.findIndex((n) => n.tag === config.parentTag);
-      if (parentIndex >= 0) {
-        path = stack.slice(parentIndex);
-      }
-    }
-
-    if (config.parentTag && config.ignoreParentSegment && path.length) {
-      path = path.slice(1);
-    }
-
-    return path;
-  }
-
-  /**
-   * Generate XPath string from path
-   */
-  generateXPath(path, config) {
-    try {
-      const segments = path.map((node, index) =>
-        this.generateXPathSegment(node, index, path.length, config)
-      );
-
-      return "/" + segments.join("/");
-    } catch (error) {
-      console.error("XPath generation error:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Generate a single XPath segment
-   */
-  generateXPathSegment(node, index, pathLength, config) {
-    const isLeaf = index === pathLength - 1;
-    let segment = node.tag;
-
-    // Add attribute predicate
-    segment += this.generateAttributePredicate(node, config);
-
-    // Add index
-    segment += this.generateIndex(node, isLeaf, config);
-
-    return segment;
-  }
-
-  /**
-   * Generate attribute predicate
-   */
-  generateAttributePredicate(node, config) {
-    if (!node.attrName || !node.attrValue) return "";
-
-    if (config.predicateTemplate) {
-      const data = {
-        tag: node.tag,
-        attr1: node.attrName,
-        attr1V: node.attrValue,
-        xllv: node.customIndexRaw || "",
-        xllvI: node.customIndex != null ? node.customIndex : "",
-        idx: node.idx,
-      };
-      return config.predicateTemplate.replace(
-        /\{(\w+)\}/g,
-        (_, k) => data[k] || ""
-      );
-    } else if (config.mode.includeAttributes) {
-      const escapedValue = this.escapeAttributeValue(node.attrValue);
-      return `[@${node.attrName}='${escapedValue}']`;
-    }
-
-    return "";
-  }
-
-  /**
-   * Generate index predicate
-   */
-  generateIndex(node, isLeaf, config) {
-    // Skip index based on configuration
-    if (isLeaf && config.disableLeafIndex) return "";
-    if (!config.mode.includeIndices) return "";
-
-    // Determine which index to use
-    let index =
-      config.useXlinkLabelIndex && node.customIndex != null
-        ? node.customIndex
-        : node.idx;
-
-    // Skip based on rules
-    if (config.skipSingleIndex && index === 1) return "";
-    if (index === 1 && config.ignoreTags.has(node.tag)) return "";
-
-    return `[${index}]`;
-  }
-
-  /**
-   * Escape attribute value for XPath
-   */
-  escapeAttributeValue(value) {
-    return value.replace(/'/g, "&apos;");
-  }
-
-  clearCache(uri) {
-    if (uri) {
-      this.cache.delete(uri.toString());
-    } else {
-      this.cache.clear();
-    }
-  }
-}
-
-// Global XPath builder instance
+// Global instance of our pure logic class
 const xpathBuilder = new XPathBuilder();
 
+// We override the 'loadConfiguration' method on our instance
+// to use the real VS Code API. This is a clean way to inject dependencies.
+xpathBuilder.loadConfiguration = function() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  return {
+    parentTag: cfg.get("parentTag", null),
+    mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
+    preferredAttributes: cfg.get("preferredAttributes", []),
+    ignoreTags: new Set(cfg.get("ignoreIndexTags", [])),
+    disableLeafIndex: cfg.get("disableLeafIndex", false),
+    skipSingleIndex: cfg.get("skipSingleIndex", false),
+    useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", false),
+    useParentScopedIndices: cfg.get("useParentScopedIndices", false),
+    ignoreParentSegment: cfg.get("ignoreParentSegment", false),
+  };
+};
+
 function activate(context) {
-  statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    100
-  );
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBarItem.command = "xmlXpath.copyXPath";
   context.subscriptions.push(statusBarItem);
 
-  // Register all commands
   registerCommands(context);
 
-  // Optimized update handlers with debouncing
-  context.subscriptions.push(
-    vscode.window.onDidChangeTextEditorSelection(debounce(update, 150))
-  );
-
+  const debouncedUpdate = debounce(update, 150);
+  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(debouncedUpdate));
   context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(update));
-
-  // Clear cache when documents change
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((event) => {
-      // Debounce cache clearing to avoid excessive operations
-      debounce(() => xpathBuilder.clearCache(event.document.uri), 300)();
-    })
-  );
-
-  // Clear cache when documents are closed
-  context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument((document) => {
-      xpathBuilder.clearCache(document.uri);
-    })
-  );
 
   update();
 }
 
 function registerCommands(context) {
-  const commands = [
-    ["xmlXpath.setParent", setParent],
-    ["xmlXpath.clearParent", clearParent],
-    ["xmlXpath.setMode", setMode],
-    ["xmlXpath.setPreferredAttributes", setPreferredAttrs],
-    ["xmlXpath.setIgnoreIndexTags", setIgnoreTags],
-    ["xmlXpath.setTemplate", setTemplate],
-    ["xmlXpath.copyXPath", copyXPath],
-    ["xmlXpath.toggleDisableLeafIndex", toggleDisableLeafIndex],
-    ["xmlXpath.toggleSkipSingleIndex", toggleSkipSingleIndex],
-    ["xmlXpath.toggleUseXlinkLabelIndex", toggleUseXlinkLabelIndex],
-    ["xmlXpath.toggleParentScopedIndexing", toggleParentScopedIndexing],
-    ["xmlXpath.toggleIgnoreParentSegment", toggleIgnoreParentSegment],
-  ];
+  const commands = {
+    "xmlXpath.setParent": setParentTag,
+    "xmlXpath.clearParent": () => updateConfig("parentTag", null, "Parent tag cleared."),
+    "xmlXpath.setMode": setMode,
+    "xmlXpath.setPreferredAttributes": () => updateConfig("preferredAttributes", "Preferred attributes (comma-separated)", (val) => val.split(',').map(s => s.trim()).filter(Boolean)),
+    "xmlXpath.setIgnoreIndexTags": () => updateConfig("ignoreIndexTags", "Tags to ignore index [1] (comma-separated)", (val) => val.split(',').map(s => s.trim()).filter(Boolean)),
+    "xmlXpath.copyXPath": copyXPath,
+    "xmlXpath.toggleDisableLeafIndex": () => toggleConfig("disableLeafIndex", "Disable Leaf Index"),
+    "xmlXpath.toggleSkipSingleIndex": () => toggleConfig("skipSingleIndex", "Skip Index [1]"),
+    "xmlXpath.toggleUseXlinkLabelIndex": () => toggleConfig("useXlinkLabelIndex", "Use xlink:label Index"),
+    "xmlXpath.toggleParentScopedIndexing": () => toggleConfig("useParentScopedIndices", "Parent-Scoped Indexing"),
+    "xmlXpath.toggleIgnoreParentSegment": () => toggleConfig("ignoreParentSegment", "Ignore Parent Segment"),
+    "xmlXpath.setTemplate": () => updateConfig("predicateTemplate", "Predicate template (use {attr1}, {attr1V}, {tag}, {idx})"),
+  };
 
-  commands.forEach(([name, handler]) => {
+  for (const [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(name, handler));
+  }
+}
+
+async function setParentTag() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const currentValue = cfg.get("parentTag", "");
+  
+  // Get the tag under cursor
+  let tagUnderCursor = "";
+  const editor = vscode.window.activeTextEditor;
+  if (editor && isXmlLanguage(editor.document)) {
+    try {
+      // Get the current element stack
+      const xml = editor.document.getText();
+      const offset = editor.document.offsetAt(editor.selection.active);
+      const config = xpathBuilder.loadConfiguration();
+      
+      const events = xpathBuilder.tokenizeXML(xml);
+      if (events) {
+        const stackResult = xpathBuilder.buildElementStack(events, offset, config);
+        if (stackResult && stackResult.stack.length > 0) {
+          // Get the tag name of the current element
+          tagUnderCursor = stackResult.stack[stackResult.stack.length - 1].tag;
+        }
+      }
+    } catch (error) {
+      console.error("Error getting tag under cursor:", error);
+    }
+  }
+  
+  const value = await vscode.window.showInputBox({
+    prompt: "Parent tag for relative XPath",
+    value: tagUnderCursor || currentValue, // Prefer tag under cursor
+    placeHolder: currentValue || tagUnderCursor || "e.g., section, div, body"
   });
+  
+  if (value !== undefined) {
+    await cfg.update("parentTag", value || null, vscode.ConfigurationTarget.Global);
+    update();
+    
+    // Show confirmation with example
+    if (value) {
+      vscode.window.showInformationMessage(`Parent tag set to: ${value}. XPaths will now be relative to <${value}>`);
+    }
+  }
 }
 
 function deactivate() {
   if (statusBarItem) statusBarItem.dispose();
-  xpathBuilder.clearCache();
 }
 
-// Debounce utility
 function debounce(func, wait) {
   let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
+  return (...args) => {
     clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
+    timeout = setTimeout(() => func.apply(this, args), wait);
   };
 }
 
-// Command implementations
-
-async function toggleIgnoreParentSegment() {
+async function updateConfig(key, prompt, transformer) {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("ignoreParentSegment", false);
-  await cfg.update(
-    "ignoreParentSegment",
-    !current,
-    vscode.ConfigurationTarget.Global
-  );
-  vscode.window.showInformationMessage(
-    `Ignore Parent Segment: ${!current ? "ON" : "OFF"}`
-  );
-  update();
-}
-
-async function toggleDisableLeafIndex() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("disableLeafIndex", false);
-  await cfg.update(
-    "disableLeafIndex",
-    !current,
-    vscode.ConfigurationTarget.Global
-  );
-  vscode.window.showInformationMessage(`disableLeafIndex: ${!current}`);
-  update();
-}
-
-async function toggleParentScopedIndexing() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("useParentScopedIndices", false);
-  await cfg.update(
-    "useParentScopedIndices",
-    !current,
-    vscode.ConfigurationTarget.Global
-  );
-  vscode.window.showInformationMessage(
-    `Parent‑scoped indexing: ${!current ? "ON" : "OFF"}`
-  );
-  update();
-}
-
-async function toggleUseXlinkLabelIndex() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("useXlinkLabelIndex", false);
-  await cfg.update(
-    "useXlinkLabelIndex",
-    !current,
-    vscode.ConfigurationTarget.Global
-  );
-  vscode.window.showInformationMessage(`useXlinkLabelIndex: ${!current}`);
-  update();
-}
-
-async function toggleSkipSingleIndex() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("skipSingleIndex", false);
-  await cfg.update(
-    "skipSingleIndex",
-    !current,
-    vscode.ConfigurationTarget.Global
-  );
-  vscode.window.showInformationMessage(`skipSingleIndex: ${!current}`);
-  update();
-}
-
-async function setParent() {
-  const value = await vscode.window.showInputBox({
-    prompt: "Parent tag for relative XPath (leave empty for full)",
-    placeHolder: "e.g., body, div, etc.",
+  const currentValue = cfg.get(key);
+  
+  // Format current value for display
+  let placeholderValue = '';
+  if (currentValue !== null && currentValue !== undefined) {
+    if (Array.isArray(currentValue)) {
+      placeholderValue = currentValue.join(', ');
+    } else {
+      placeholderValue = String(currentValue);
+    }
+  }
+  
+  const value = await vscode.window.showInputBox({ 
+    prompt,
+    value: placeholderValue, // Pre-fill with current value
+    placeHolder: placeholderValue || 'No value set'
   });
+  
   if (value !== undefined) {
-    await vscode.workspace
-      .getConfiguration(CONFIG_SECTION)
-      .update("parentTag", value || null, vscode.ConfigurationTarget.Global);
+    const finalValue = transformer ? transformer(value) : (value || null);
+    await cfg.update(key, finalValue, vscode.ConfigurationTarget.Global);
     update();
   }
 }
 
-async function clearParent() {
+async function toggleConfig(key, message) {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("parentTag", null, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(
-    "Parent tag cleared — now generating full absolute XPaths."
-  );
-  update(); // refresh the status bar
+  const current = cfg.get(key, false);
+  await cfg.update(key, !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`${message}: ${!current ? "ON" : "OFF"}`);
+  update();
 }
 
 async function setMode() {
   const options = [
     { label: "Both", value: { includeIndices: true, includeAttributes: true } },
-    {
-      label: "Attributes Only",
-      value: { includeIndices: false, includeAttributes: true },
-    },
-    {
-      label: "Indices Only",
-      value: { includeIndices: true, includeAttributes: false },
-    },
-    {
-      label: "Simple",
-      value: { includeIndices: false, includeAttributes: false },
-    },
+    { label: "Attributes Only", value: { includeIndices: false, includeAttributes: true } },
+    { label: "Indices Only", value: { includeIndices: true, includeAttributes: false } },
+    { label: "Simple (Tag path only)", value: { includeIndices: false, includeAttributes: false } },
   ];
-  const pick = await vscode.window.showQuickPick(options, {
-    placeHolder: "Select XPath mode",
-  });
+  const pick = await vscode.window.showQuickPick(options, { placeHolder: "Select XPath generation mode" });
   if (pick) {
-    await vscode.workspace
-      .getConfiguration(CONFIG_SECTION)
-      .update("mode", pick.value, vscode.ConfigurationTarget.Global);
-    update();
-  }
-}
-
-async function setPreferredAttrs() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("preferredAttributes", []);
-  const input = await vscode.window.showInputBox({
-    prompt: "Preferred attributes (comma-separated, e.g. id,name,class)",
-    value: current.join(","),
-    placeHolder: "id,name,class,data-id",
-  });
-  if (input !== undefined) {
-    const list = input
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    await cfg.update(
-      "preferredAttributes",
-      list,
-      vscode.ConfigurationTarget.Global
-    );
-    vscode.window.showInformationMessage(
-      `Preferred attributes set to: ${list.join(", ")}`
-    );
-    update();
-  }
-}
-
-async function setIgnoreTags() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("ignoreIndexTags", []);
-  const input = await vscode.window.showInputBox({
-    prompt: "Tags to ignore index [1] (comma-separated)",
-    value: current.join(","),
-    placeHolder: "div,span,p",
-  });
-  if (input !== undefined) {
-    const list = input
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    await cfg.update(
-      "ignoreIndexTags",
-      list,
-      vscode.ConfigurationTarget.Global
-    );
-    update();
-  }
-}
-
-async function setTemplate() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']");
-  const tpl = await vscode.window.showInputBox({
-    prompt:
-      "Predicate template using tokens {tag},{attr1},{attr1V},{xllv},{xllvI},{idx}",
-    value: current,
-    placeHolder: "[@{attr1}='{attr1V}']",
-  });
-  if (tpl !== undefined) {
-    await cfg.update(
-      "predicateTemplate",
-      tpl,
-      vscode.ConfigurationTarget.Global
-    );
-    vscode.window.showInformationMessage("Predicate template set.");
+    await vscode.workspace.getConfiguration(CONFIG_SECTION).update("mode", pick.value, vscode.ConfigurationTarget.Global);
     update();
   }
 }
 
 async function copyXPath() {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return;
-
+  if (!editor || !isXmlLanguage(editor.document)) return;
   try {
-    const xpath = xpathBuilder.buildXPath(
-      editor.document,
-      editor.selection.active
-    );
+    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
     if (xpath) {
       await vscode.env.clipboard.writeText(xpath);
-      vscode.window.showInformationMessage(`Copied XPath: ${xpath}`);
-    } else {
-      vscode.window.showErrorMessage(
-        "Unable to compute XPath for current position."
-      );
+      vscode.window.showInformationMessage(`Copied: ${xpath}`);
     }
   } catch (error) {
     console.error("Error copying XPath:", error);
-    vscode.window.showErrorMessage(
-      "Error computing XPath. Please check the XML structure."
-    );
+    vscode.window.showErrorMessage("Could not compute XPath.");
   }
+}
+
+function isXmlLanguage(document) {
+  const xmlLanguages = ["xml", "xsl", "xsd", "wsdl", "xaml", "svg", "xhtml"];
+  return xmlLanguages.includes(document.languageId);
 }
 
 function update() {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return statusBarItem.hide();
-
-  // Only process XML-related files
-  const xmlLanguages = ["xml", "xsl", "xsd", "wsdl", "xaml", "svg", "xhtml"];
-  if (!xmlLanguages.includes(editor.document.languageId)) {
+  if (!editor || !isXmlLanguage(editor.document)) {
     return statusBarItem.hide();
   }
 
   try {
-    const xpath = xpathBuilder.buildXPath(
-      editor.document,
-      editor.selection.active
-    );
+    const config = xpathBuilder.loadConfiguration();
+    
+    // Debug: Show current config state
+    if (config.useXlinkLabelIndex) {
+      console.log("xlink:label indexing is ENABLED");
+    }
+    
+    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
     if (xpath) {
-      // Truncate very long XPaths for display
-      const displayXPath =
-        xpath.length > 80 ? xpath.substring(0, 77) + "..." : xpath;
+      const displayXPath = xpath.length > 80 ? xpath.substring(0, 77) + "..." : xpath;
       statusBarItem.text = `$(code) ${displayXPath}`;
-      statusBarItem.tooltip = `XPath: ${xpath}\nClick to copy`;
+      statusBarItem.tooltip = `XPath: ${xpath}\n(Click to copy)`;
       statusBarItem.show();
     } else {
       statusBarItem.hide();
@@ -1001,5 +214,7 @@ function update() {
     statusBarItem.hide();
   }
 }
-
-module.exports = { activate, deactivate };
+module.exports = {
+  activate,
+  deactivate,
+};

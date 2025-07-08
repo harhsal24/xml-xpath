@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MegaStoreInventory xmlns:promo="http://www.megastore.com/promo" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+    <!-- Scenario 1: Basic Siblings and Attributes -->
+    <StoreLocations id="locations">
+        <Location id="loc-nyc" region="East">New York</Location>
+        <Location id="loc-sfo" region="West">San Francisco</Location>
+        <Location id="loc-chi" region="Midwest">Chicago</Location>
+        <Location id="loc-mia" region="East">Miami</Location>
+    </StoreLocations>
+
+    <!-- Scenario 2: Deep & Recursive Nesting with Same-Named Tags -->
+    <ProductCategories id="categories">
+        <Category name="Electronics">
+            <Category name="Computers">
+                <Category name="Laptops">
+                    <Product sku="LT-1001">UltraBook Pro</Product>
+                    <Product sku="LT-1002">Gamer's Delight</Product>
+                </Category>
+                <Category name="Desktops">
+                    <Product sku="DT-2001">Office Workhorse</Product>
+                </Category>
+            </Category>
+            <Category name="Audio">
+                <Product sku="AU-3001">Noise-Cancelling Headphones</Product>
+            </Category>
+        </Category>
+        <Category name="Books">
+            <Product sku="BK-4001">The Last Algorithm</Product>
+        </Category>
+    </ProductCategories>
+
+    <!-- Scenario 3: Namespaces and Self-Closing Tags -->
+    <Promotions id="promos">
+        <promo:HolidaySale>
+            <promo:Code>WINTER25</promo:Code>
+            <DiscountApplied type="percentage" value="25" />
+        </promo:HolidaySale>
+        <promo:Clearance>
+            <promo:Code>CLEAROUT</promo:Code>
+            <DiscountApplied type="fixed" value="50" />
+        </promo:Clearance>
+    </Promotions>
+
+    <!-- Scenario 4: xlink:label Indexing and Complex Attribute Predicates -->
+    <OnlineOrders id="orders">
+        <Order xlink:label="order_A123">
+            <Product sku="LT-1001" name="UltraBook Pro" />
+            <Product sku="AU-3001" name="Headphones" />
+        </Order>
+        <Order xlink:label="order_B789">
+            <Product sku="BK-4001" name="The Last Algorithm" />
+        </Order>
+        <Order> <!-- No xlink:label -->
+            <Product sku="DT-2001" name="Office Workhorse" />
+        </Order>
+    </OnlineOrders>
+
+    <!-- Scenario 5: Mixed Siblings & Parent-Scoped Indexing Test -->
+    <CustomerFeedback id="feedback">
+        <Feedback>
+            <Rating>5</Rating>
+            <Comment>Excellent product!</Comment>
+            <Comment>Fast shipping too.</Comment>
+            <FollowUpRequired/>
+        </Feedback>
+        <Feedback>
+            <Rating>3</Rating>
+            <Comment>It's okay, but the battery life is short.</Comment>
+        </Feedback>
+    </CustomerFeedback>
+
+    <!-- Scenario 6: CDATA Sections -->
+    <InternalNotes id="notes">
+        <Note author="devteam">
+            <code><![CDATA[
+                function checkStock(sku) {
+                    if (sku.startsWith("LT-")) { // Laptops
+                        return stock > 10;
+                    }
+                    return false;
+                }
+            ]]></code>
+        </Note>
+        <Note author="marketing">
+            <Description><![CDATA[Launch promo with <50% discount for SKU-4001 & SKU-3001]]></Description>
+        </Note>
+    </InternalNotes>
+    
+    <!-- Scenario 7: Empty Elements and Mixed Content -->
+    <ProductDetails id="details">
+        <Detail sku="LT-1001">
+            <Description>The <b>new</b> UltraBook Pro is <i>blazing</i> fast.</Description>
+            <Warranty/>
+            <SupportPlan></SupportPlan>
+        </Detail>
+    </ProductDetails>
+
+</MegaStoreInventory>
