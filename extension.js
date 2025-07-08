@@ -197,7 +197,7 @@ class XPathBuilder {
       .replace(/'/g, "&apos;");
   }
 
-buildXPath(document, position) {
+  buildXPath(document, position) {
     const structure = this.getDocumentStructure(document);
 
     // If parsing failed or document is too large, fall back to regex
@@ -209,29 +209,29 @@ buildXPath(document, position) {
 
     // For now, we'll still use the regex approach as the main XPath builder
     return this.buildXPathRegex(document, position); // Make sure both parameters are passed
-}
+  }
 
-// To make sure it has both parameters:
-buildXPathRegex(document, position) {
+  // To make sure it has both parameters:
+  buildXPathRegex(document, position) {
     const xml = document.getText();
     const offset = document.offsetAt(position);
     const config = this.loadConfiguration();
-    
+
     // Tokenize XML
-    const events = this.tokenizeXML(xml, offset,config);
+    const events = this.tokenizeXML(xml, offset, config);
     if (!events) return null;
-    
+
     // Build element stack with indices
     const stackResult = this.buildElementStack(events, offset, config);
     if (!stackResult || !stackResult.stack.length) return null;
-    
+
     // Process path based on configuration
     const path = this.processPath(stackResult.stack, config);
     if (!path.length) return null;
-    
+
     // Generate XPath string
     return this.generateXPath(path, config);
-}
+  }
 
   /**
    * Load configuration settings
@@ -251,183 +251,116 @@ buildXPathRegex(document, position) {
       useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", false),
       useParentScopedIndices: cfg.get("useParentScopedIndices", false),
       ignoreParentSegment: cfg.get("ignoreParentSegment", false),
-       maxParseSize: cfg.get("maxParseSize", 1000000), // 1MB default
+      maxParseSize: cfg.get("maxParseSize", 1000000), // 1MB default
     };
   }
 
-/**
- * Tokenize XML into events
- */
-tokenizeXML(xml, offset, config) {
-  // Use the preprocessing method
-  const cleanedXml = this.preprocessForTokenization(xml);
-  
-  const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
-  const events = [];
-  let match;
-  
-  // For very large documents, use a different strategy
-  const useFullParse = !config || xml.length <= (config.maxParseSize || 1000000);
+  /**
+   * Tokenize XML into events
+   */
+  tokenizeXML(xml, offset, config) {
+    // Use the preprocessing method
+    const cleanedXml = this.preprocessForTokenization(xml);
 
-  try {
-    while ((match = tokenRegex.exec(cleanedXml))) {
-      const event = this.parseXMLToken(match);
-      if (event) {
-        events.push(event);
+    const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
+    const events = [];
+    let match;
 
-        // Add close event for self-closing tags
-        if (event.type === "open" && event.selfClose) {
-          events.push({ type: "close", tag: event.tag, pos: event.pos });
+    // For very large documents, use a different strategy
+    const useFullParse =
+      !config || xml.length <= (config.maxParseSize || 1000000);
+
+    try {
+      while ((match = tokenRegex.exec(cleanedXml))) {
+        const event = this.parseXMLToken(match);
+        if (event) {
+          events.push(event);
+
+          // Add close event for self-closing tags
+          if (event.type === "open" && event.selfClose) {
+            events.push({ type: "close", tag: event.tag, pos: event.pos });
+          }
+        }
+
+        // For large documents, stop after parsing enough context
+        if (!useFullParse && match.index > offset + 50000) {
+          break;
         }
       }
-      
-      // For large documents, stop after parsing enough context
-      if (!useFullParse && match.index > offset + 50000) {
-        break;
+      return events;
+    } catch (error) {
+      console.error("XML tokenization error:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Preprocess XML for tokenization (remove CDATA, comments, and other non-element content)
+   */
+  preprocessForTokenization(xml) {
+    let processed = xml;
+
+    // Handle CDATA sections using string operations
+    let cdataStart = processed.indexOf("<![CDATA[");
+    while (cdataStart !== -1) {
+      const cdataEnd = processed.indexOf("]]>", cdataStart);
+      if (cdataEnd !== -1) {
+        const cdataLength = cdataEnd + 3 - cdataStart;
+        processed =
+          processed.substring(0, cdataStart) +
+          " ".repeat(cdataLength) +
+          processed.substring(cdataEnd + 3);
+      }
+      cdataStart = processed.indexOf("<![CDATA[", cdataStart + 1);
+    }
+
+    // Handle comments using string operations
+    let commentStart = processed.indexOf("<!--");
+    while (commentStart !== -1) {
+      const commentEnd = processed.indexOf("-->", commentStart);
+      if (commentEnd !== -1) {
+        const commentLength = commentEnd + 3 - commentStart;
+        processed =
+          processed.substring(0, commentStart) +
+          " ".repeat(commentLength) +
+          processed.substring(commentEnd + 3);
+      }
+      commentStart = processed.indexOf("<!--", commentStart + 1);
+    }
+
+    // Remove XML declarations
+    processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => {
+      return " ".repeat(match.length);
+    });
+
+    // Remove DOCTYPE declarations
+    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => {
+      return " ".repeat(match.length);
+    });
+
+    // Remove processing instructions
+    processed = processed.replace(/<\?[^>]*\?>/g, (match) => {
+      return " ".repeat(match.length);
+    });
+
+    return processed;
+  }
+
+  /**
+   * Create offset mapping for preprocessed XML
+   */
+  createOffsetMap(original, processed) {
+    const map = new Map();
+    let offset = 0;
+
+    for (let i = 0; i < processed.length; i++) {
+      if (processed[i] !== " " || original[i] !== " ") {
+        map.set(i, i + offset);
       }
     }
-    return events;
-  } catch (error) {
-    console.error("XML tokenization error:", error);
-    return null;
+
+    return map;
   }
-}
-
-/**
- * Preprocess XML for tokenization (remove CDATA, comments, and other non-element content)
- */
-preprocessForTokenization(xml) {
-  let processed = xml;
-  
-  // Handle CDATA sections using string operations
-  let cdataStart = processed.indexOf('<![CDATA[');
-  while (cdataStart !== -1) {
-    const cdataEnd = processed.indexOf(']]>', cdataStart);
-    if (cdataEnd !== -1) {
-      const cdataLength = cdataEnd + 3 - cdataStart;
-      processed = processed.substring(0, cdataStart) + 
-                  ' '.repeat(cdataLength) + 
-                  processed.substring(cdataEnd + 3);
-    }
-    cdataStart = processed.indexOf('<![CDATA[', cdataStart + 1);
-  }
-  
-  // Handle comments using string operations
-  let commentStart = processed.indexOf('<!--');
-  while (commentStart !== -1) {
-    const commentEnd = processed.indexOf('-->', commentStart);
-    if (commentEnd !== -1) {
-      const commentLength = commentEnd + 3 - commentStart;
-      processed = processed.substring(0, commentStart) + 
-                  ' '.repeat(commentLength) + 
-                  processed.substring(commentEnd + 3);
-    }
-    commentStart = processed.indexOf('<!--', commentStart + 1);
-  }
-  
-  // Remove XML declarations
-  processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => {
-    return ' '.repeat(match.length);
-  });
-  
-  // Remove DOCTYPE declarations
-  processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => {
-    return ' '.repeat(match.length);
-  });
-  
-  // Remove processing instructions
-  processed = processed.replace(/<\?[^>]*\?>/g, (match) => {
-    return ' '.repeat(match.length);
-  });
-  
-  return processed;
-}
-
-/**
- * Create offset mapping for preprocessed XML
- */
-createOffsetMap(original, processed) {
-  const map = new Map();
-  let offset = 0;
-  
-  for (let i = 0; i < processed.length; i++) {
-    if (processed[i] !== ' ' || original[i] !== ' ') {
-      map.set(i, i + offset);
-    }
-  }
-  
-  return map;
-}
-/**
- * Build element stack with proper indexing
- */
-buildElementStack(events, offset, config) {
-  const stack = [];
-  const counters = config.useParentScopedIndices ? {} : [];
-  const currentStack = [];
-  let targetStack = null;
-  let lastPos = 0;
-
-  for (const event of events) {
-    if (event.type === "open") {
-      const depth = currentStack.length;
-      let idx;
-      
-      if (config.useParentScopedIndices) {
-        // Parent-scoped counting
-        const parentPath = currentStack.map(e => e.tag).join('/');
-        if (!counters[parentPath]) counters[parentPath] = {};
-        counters[parentPath][event.tag] = (counters[parentPath][event.tag] || 0) + 1;
-        idx = counters[parentPath][event.tag];
-      } else {
-        // Depth-based counting
-        if (!counters[depth]) counters[depth] = {};
-        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-        idx = counters[depth][event.tag];
-      }
-
-      const { attrName, attrValue } = this.selectPreferredAttribute(
-        event.attrs,
-        config.preferredAttributes
-      );
-
-      const element = {
-        tag: event.tag,
-        idx,
-        customIndex: event.customIndex,
-        customIndexRaw: event.customIndexRaw,
-        attrName,
-        attrValue,
-        startPos: event.pos
-      };
-      
-      currentStack.push(element);
-      lastPos = event.pos;
-      
-    } else if (event.type === "close") {
-      if (currentStack.length && currentStack[currentStack.length - 1].tag === event.tag) {
-        const opening = currentStack[currentStack.length - 1];
-        
-        // Check if cursor is inside this element
-        if (!targetStack && opening.startPos <= offset && event.pos >= offset) {
-          // Found the element containing the cursor
-          targetStack = currentStack.map(e => ({...e}));
-        }
-        
-        currentStack.pop();
-      }
-      lastPos = event.pos;
-    }
-    
-    // Also check if cursor is right after an opening tag
-    if (!targetStack && lastPos <= offset && event.pos > offset) {
-      targetStack = currentStack.map(e => ({...e}));
-    }
-  }
-
-  // If we didn't find the cursor position, use the last valid stack
-  return { stack: targetStack || currentStack, counters };
-}
 
   /**
    * Parse a single XML token match
@@ -491,77 +424,77 @@ buildElementStack(events, offset, config) {
     return { customIndex, customIndexRaw };
   }
 
+
 /**
- * Build element stack with proper indexing
+ * Build element stack with proper indexing, respecting the parent-scoped configuration.
  */
 buildElementStack(events, offset, config) {
-  const stack = [];
-  const allElements = [];
-  let currentPath = [];
-  
-  // First pass: build complete element tree structure
-  for (const event of events) {
-    if (event.type === "open") {
-      const element = {
-        tag: event.tag,
-        pos: event.pos,
-        depth: currentPath.length,
-        attrs: event.attrs,
-        customIndex: event.customIndex,
-        customIndexRaw: event.customIndexRaw,
-        path: [...currentPath]
-      };
-      allElements.push(element);
-      currentPath.push(event.tag);
-    } else if (event.type === "close") {
-      currentPath.pop();
+    const currentStack = [];
+    // The type of counter we use depends on the configuration.
+    const counters = config.useParentScopedIndices ? {} : [];
+    let targetStack = null;
+
+    for (const event of events) {
+        if (event.pos > offset && targetStack) {
+            break; // Optimization: we've found our target
+        }
+
+        if (event.type === "open") {
+            let idx;
+
+            // *** THIS IS THE CRITICAL LOGIC SWITCH ***
+            if (config.useParentScopedIndices) {
+                // CORRECT PARENT-SCOPED LOGIC
+                // THIS IS THE LINE THAT WAS FIXED:
+                const parentPath = currentStack.map(e => `${e.tag}[${e.idx}]`).join('/');
+
+                if (!counters[parentPath]) {
+                    counters[parentPath] = {};
+                }
+                const tagCounter = counters[parentPath];
+                tagCounter[event.tag] = (tagCounter[event.tag] || 0) + 1;
+                idx = tagCounter[event.tag];
+            } else {
+                // ORIGINAL GLOBAL (DEPTH-BASED) LOGIC
+                const depth = currentStack.length;
+                if (!counters[depth]) {
+                    counters[depth] = {};
+                }
+                counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+                idx = counters[depth][event.tag];
+            }
+
+            const { attrName, attrValue } = this.selectPreferredAttribute(
+                event.attrs,
+                config.preferredAttributes
+            );
+
+            const element = {
+                tag: event.tag,
+                idx, // Use the correctly calculated index
+                customIndex: event.customIndex,
+                customIndexRaw: event.customIndexRaw,
+                attrName,
+                attrValue,
+                startPos: event.pos
+            };
+            
+            currentStack.push(element);
+
+        } else if (event.type === "close") {
+            if (currentStack.length > 0 && currentStack[currentStack.length - 1].tag === event.tag) {
+                const openingElement = currentStack[currentStack.length - 1];
+                
+                if (!targetStack && openingElement.startPos <= offset && event.pos >= offset) {
+                    targetStack = [...currentStack];
+                }
+                
+                currentStack.pop();
+            }
+        }
     }
-  }
-  
-  // Second pass: calculate indices for each element
-  const indexMap = new Map();
-  for (const element of allElements) {
-    const pathKey = element.path.join('/');
-    const siblingKey = `${pathKey}/${element.tag}`;
-    
-    if (!indexMap.has(siblingKey)) {
-      indexMap.set(siblingKey, 0);
-    }
-    indexMap.set(siblingKey, indexMap.get(siblingKey) + 1);
-    element.idx = indexMap.get(siblingKey);
-  }
-  
-  // Third pass: build stack for cursor position
-  currentPath = [];
-  for (const event of events) {
-    if (event.pos > offset) break;
-    
-    if (event.type === "open") {
-      // Find the matching element from our pre-calculated elements
-      const element = allElements.find(el => el.pos === event.pos);
-      if (element) {
-        const { attrName, attrValue } = this.selectPreferredAttribute(
-          element.attrs,
-          config.preferredAttributes
-        );
-        
-        stack.push({
-          tag: element.tag,
-          idx: element.idx,
-          customIndex: element.customIndex,
-          customIndexRaw: element.customIndexRaw,
-          attrName,
-          attrValue,
-        });
-      }
-    } else if (event.type === "close") {
-      if (stack.length && stack[stack.length - 1].tag === event.tag) {
-        stack.pop();
-      }
-    }
-  }
-  
-  return { stack };
+
+    return { stack: targetStack || currentStack };
 }
 
   /**
