@@ -19,6 +19,21 @@ class XPathBuilder {
     this.parser = new XMLParser(parserOptions);
   }
 
+  loadConfiguration() {
+    return {
+      parentTag: null,
+      mode: { includeIndices: true, includeAttributes: true },
+      preferredAttributes: [],
+      ignoreTags: new Set(),
+      disableLeafIndex: false,
+      skipSingleIndex: false,
+      useXlinkLabelIndex: false,
+      useParentScopedIndices: false,
+      ignoreParentSegment: false,
+      predicateTemplate: "[@{attr1}='{attr1V}']",
+    };
+  }
+
   buildXPathRegex(document, position) {
     const xml = document.getText();
     const offset = document.offsetAt(position);
@@ -60,11 +75,11 @@ class XPathBuilder {
 
   preprocessForTokenization(xml) {
     let processed = xml;
-    processed = processed.replace(/<!--[\s\S]*?-->/g, (match) => ' '.repeat(match.length));
-    processed = processed.replace(/<!\[CDATA$$[\s\S]*?$$\]>/g, (match) => ' '.repeat(match.length));
-    processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => ' '.repeat(match.length));
-    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => ' '.repeat(match.length));
-    processed = processed.replace(/<\?[^>]*\?>/g, (match) => ' '.repeat(match.length));
+  processed = processed.replace(/<!--[\s\S]*?-->/g, (match) => ' '.repeat(match.length));
+//   processed = processed.replace(/<!\[CDATA$$[\s\S]*?$$\]>/g, (match) => ' '.repeat(match.length));
+  processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => ' '.repeat(match.length));
+  processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => ' '.repeat(match.length));
+  processed = processed.replace(/<\?[^>]*\?>/g, (match) => ' '.repeat(match.length));
     return processed;
   }
 
@@ -192,11 +207,76 @@ parseXlinkLabel(attrs) {
     return segment;
   }
 
-  generateAttributePredicate(node, config) {
-    if (!node.attrName || !node.attrValue || !config.mode.includeAttributes) return "";
+generateAttributePredicate(node, config) {
+  if (!node.attrName || !node.attrValue || !config.mode.includeAttributes) return "";
+  
+  // Use template if provided
+  if (config.predicateTemplate) {
     const escapedValue = this.escapeAttributeValue(node.attrValue);
-    return `[@${node.attrName}='${escapedValue}']`;
+    
+    // Replace template tokens
+    let predicate = config.predicateTemplate;
+    
+    // Basic tokens
+    predicate = predicate.replace(/{at}/g, '@');
+    predicate = predicate.replace(/{tag}/g, node.tag);
+    predicate = predicate.replace(/{attr1}/g, node.attrName);
+    predicate = predicate.replace(/{attr1V}/g, escapedValue);
+    predicate = predicate.replace(/{idx}/g, node.idx);
+    
+    // Advanced tokens for all attributes
+    if (node.attrs) {
+      // Replace {attr:name} with specific attribute values
+      predicate = predicate.replace(/{attr:(\w+)}/g, (match, attrName) => {
+        return node.attrs[attrName] ? this.escapeAttributeValue(node.attrs[attrName]) : '';
+      });
+      
+      // {attrs} - all attributes as conditions
+      if (predicate.includes('{attrs}')) {
+        const allAttrs = Object.entries(node.attrs)
+          .map(([k, v]) => `@${k}='${this.escapeAttributeValue(v)}'`)
+          .join(' and ');
+        predicate = predicate.replace(/{attrs}/g, allAttrs);
+      }
+      
+      // {attrCount} - number of attributes
+      predicate = predicate.replace(/{attrCount}/g, Object.keys(node.attrs).length);
+    }
+    
+    // Position tokens
+    predicate = predicate.replace(/{pos}/g, node.idx);
+    predicate = predicate.replace(/{lastPos}/g, `last()`);
+    predicate = predicate.replace(/{isFirst}/g, node.idx === 1 ? 'true()' : 'false()');
+    predicate = predicate.replace(/{isLast}/g, `position()=last()`);
+    
+    // xlink tokens
+    if (node.customIndex !== undefined) {
+      predicate = predicate.replace(/{xllv}/g, node.customIndexRaw || '');
+      predicate = predicate.replace(/{xllvI}/g, node.customIndex);
+    }
+    
+    // String manipulation tokens
+    predicate = predicate.replace(/{attr1Lower}/g, node.attrName.toLowerCase());
+    predicate = predicate.replace(/{attr1Upper}/g, node.attrName.toUpperCase());
+    predicate = predicate.replace(/{attr1VLower}/g, escapedValue.toLowerCase());
+    predicate = predicate.replace(/{attr1VUpper}/g, escapedValue.toUpperCase());
+    
+    // Conditional tokens
+    predicate = predicate.replace(/{if:([^:]+):([^:]+):([^}]+)}/g, (match, condition, ifTrue, ifFalse) => {
+      // Simple condition evaluation
+      if (condition === 'hasId') return node.attrs?.id ? ifTrue : ifFalse;
+      if (condition === 'hasClass') return node.attrs?.class ? ifTrue : ifFalse;
+      if (condition === 'isFirst') return node.idx === 1 ? ifTrue : ifFalse;
+      return ifFalse;
+    });
+    
+    return predicate;
   }
+  
+  // Default format if no template
+  const escapedValue = this.escapeAttributeValue(node.attrValue);
+  return `[@${node.attrName}='${escapedValue}']`;
+}
   
   generateIndex(node, isLeaf, config) {
     if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex)) return "";
