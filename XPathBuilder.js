@@ -31,6 +31,7 @@ class XPathBuilder {
       useParentScopedIndices: false,
       ignoreParentSegment: false,
       predicateTemplate: "[@{attr1}='{attr1V}']",
+      xlinkLabelPattern: { type: "any", pattern: "" },
     };
   }
 
@@ -39,7 +40,7 @@ class XPathBuilder {
     const offset = document.offsetAt(position);
     const config = this.loadConfiguration();
 
-    const events = this.tokenizeXML(xml);
+    const events = this.tokenizeXML(xml, config); // Pass config
     if (!events) return null;
 
     const stackResult = this.buildElementStack(events, offset, config);
@@ -51,14 +52,14 @@ class XPathBuilder {
     return this.generateXPath(path, config);
   }
 
-  tokenizeXML(xml) {
+  tokenizeXML(xml, config) {
     const cleanedXml = this.preprocessForTokenization(xml);
     const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
     const events = [];
     let match;
     try {
       while ((match = tokenRegex.exec(cleanedXml))) {
-        const event = this.parseXMLToken(match);
+        const event = this.parseXMLToken(match, config); // Pass config
         if (event) {
           events.push(event);
           if (event.type === "open" && event.selfClose) {
@@ -75,61 +76,166 @@ class XPathBuilder {
 
   preprocessForTokenization(xml) {
     let processed = xml;
-  processed = processed.replace(/<!--[\s\S]*?-->/g, (match) => ' '.repeat(match.length));
-//   processed = processed.replace(/<!\[CDATA$$[\s\S]*?$$\]>/g, (match) => ' '.repeat(match.length));
-  processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) => ' '.repeat(match.length));
-  processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) => ' '.repeat(match.length));
-  processed = processed.replace(/<\?[^>]*\?>/g, (match) => ' '.repeat(match.length));
+
+    // CORRECTED regex patterns using template literals
+    const cdataPattern = `
+    <!\
+$$
+            # Opening <![ (Corrected)
+    CDATA           # Literal CDATA
+    \\[             # Opening bracket
+    [\\s\\S]*?      # Any content including newlines (non-greedy)
+    \
+$$\\]>         # Closing ]]> (Corrected)
+  `;
+
+    // Helper function to clean regex pattern
+    const cleanRegexPattern = (pattern) => {
+      return pattern
+        .split("\n")
+        .map((line) => line.replace(/#.*$/, "").trim())
+        .join("");
+    };
+
+    // Create regex objects
+    const cdataRegex = new RegExp(cleanRegexPattern(cdataPattern), "g");
+
+    // Apply replacements
+    processed = processed.replace(/<!--[\s\S]*?-->/g, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(cdataRegex, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<\?[^>]*\?>/g, (match) =>
+      " ".repeat(match.length)
+    );
+
     return processed;
   }
 
-  parseXMLToken(match) {
+  parseXMLToken(match, config) {
     const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
     const pos = match.index;
     if (closeSlash) {
       return { type: "close", tag, pos: pos + fullMatch.length };
     }
     const attrs = this.parseAttributes(attrsText || "");
-    const xlinkData = this.parseXlinkLabel(attrs);
-    return { type: "open", tag, attrs, pos, selfClose: !!selfCloseSlash, ...xlinkData };
+    const xlinkData = this.parseXlinkLabel(attrs, config);
+    return {
+      type: "open",
+      tag,
+      attrs,
+      pos,
+      selfClose: !!selfCloseSlash,
+      ...xlinkData,
+    };
   }
-  
-parseAttributes(attrsText) {
-  const attrs = {};
-  // Updated regex to handle namespaced attributes better
-  const attrRegex = /([\w:\-\.]+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
-  let match;
-  while ((match = attrRegex.exec(attrsText))) {
-    const attrName = match[1];
-    const attrValue = match[3];
-    
-    // Store all attributes (including xlink:label)
-    attrs[attrName] = attrValue;
-    
-    // Also check for common typos/variations
-    if (attrName === 'xlink:lable') {
-      attrs['xlink:label'] = attrValue; // Fix common typo
-    }
-  }
-  return attrs;
-}
 
-parseXlinkLabel(attrs) {
-  // Check for both correct spelling and common typo
-  const raw = attrs['xlink:label'] || attrs['xlink:lable'];
-  if (!raw) return { customIndex: undefined, customIndexRaw: undefined };
-  
-  // Extract the first number found in the string
-  const numMatch = raw.match(/\d+/);
-  const customIndex = numMatch ? parseInt(numMatch[0], 10) : undefined;
-  
-  // Debug logging (remove in production)
-  if (customIndex !== undefined) {
-    console.log(`Found xlink:label index: ${customIndex} from "${raw}"`);
+  parseAttributes(attrsText) {
+    const attrs = {};
+    // Updated regex to handle namespaced attributes better
+    const attrRegex = /([\w:\-\.]+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
+    let match;
+    while ((match = attrRegex.exec(attrsText))) {
+      const attrName = match[1];
+      const attrValue = match[3];
+
+      // Store all attributes (including xlink:label)
+      attrs[attrName] = attrValue;
+
+      // Also check for common typos/variations
+      if (attrName === "xlink:lable") {
+        attrs["xlink:label"] = attrValue; // Fix common typo
+      }
+    }
+    return attrs;
   }
-  
-  return { customIndex, customIndexRaw: raw };
-}
+
+  parseXlinkLabel(attrs, config) {
+    // Check for both correct spelling and common typo
+    const raw = attrs["xlink:label"] || attrs["xlink:lable"];
+    if (!raw) return { customIndex: undefined, customIndexRaw: undefined };
+
+    const xlinkPattern = config?.xlinkLabelPattern || {
+      type: "any",
+      pattern: "",
+    };
+    let numMatch = null;
+
+    switch (xlinkPattern.type) {
+      case "startsWith":
+        if (raw.startsWith(xlinkPattern.pattern)) {
+          const afterPrefix = raw.substring(xlinkPattern.pattern.length);
+          numMatch = afterPrefix.match(/^\d+/);
+        }
+        break;
+
+      case "contains":
+        if (raw.includes(xlinkPattern.pattern)) {
+          const index = raw.indexOf(xlinkPattern.pattern);
+          const afterPattern = raw.substring(
+            index + xlinkPattern.pattern.length
+          );
+          numMatch = afterPattern.match(/^\d+/);
+        }
+        break;
+
+      case "endsWith":
+        if (raw.endsWith(xlinkPattern.pattern)) {
+          const beforeSuffix = raw.substring(
+            0,
+            raw.length - xlinkPattern.pattern.length
+          );
+          numMatch = beforeSuffix.match(/\d+$/);
+        }
+        break;
+
+      case "exactPrefix":
+        if (raw.startsWith(xlinkPattern.pattern)) {
+          const afterPrefix = raw.substring(xlinkPattern.pattern.length);
+          numMatch = afterPrefix.match(/^\d+$/); // Must be only numbers after prefix
+        }
+        break;
+
+      case "regex":
+        try {
+          const regex = new RegExp(xlinkPattern.pattern);
+          const match = raw.match(regex);
+          if (match) {
+            // Use first capturing group if exists, otherwise whole match
+            numMatch = match[1] ? [match[1]] : match[0].match(/\d+/);
+          }
+        } catch (e) {
+          console.error("Invalid xlink regex pattern:", e);
+          numMatch = raw.match(/\d+/); // Fallback to any number
+        }
+        break;
+
+      case "any":
+      default:
+        // Extract the first number found in the string (current behavior)
+        numMatch = raw.match(/\d+/);
+        break;
+    }
+
+    const customIndex = numMatch ? parseInt(numMatch[0], 10) : undefined;
+
+    // Debug logging
+    if (customIndex !== undefined) {
+      console.log(
+        `Found xlink:label index: ${customIndex} from "${raw}" using ${xlinkPattern.type} pattern`
+      );
+    }
+
+    return { customIndex, customIndexRaw: raw };
+  }
 
   buildElementStack(events, offset, config) {
     const currentStack = [];
@@ -138,16 +244,19 @@ parseXlinkLabel(attrs) {
 
     for (const event of events) {
       if (event.pos > offset && !targetStack.length) {
-         // The moment we pass the cursor, the previous stack was the correct one.
-         targetStack = [...currentStack];
+        // The moment we pass the cursor, the previous stack was the correct one.
+        targetStack = [...currentStack];
       }
 
       if (event.type === "open") {
         let idx;
         if (config.useParentScopedIndices) {
-          const parentPath = currentStack.map(e => `${e.tag}[${e.idx}]`).join('/');
+          const parentPath = currentStack
+            .map((e) => `${e.tag}[${e.idx}]`)
+            .join("/");
           if (!counters[parentPath]) counters[parentPath] = {};
-          counters[parentPath][event.tag] = (counters[parentPath][event.tag] || 0) + 1;
+          counters[parentPath][event.tag] =
+            (counters[parentPath][event.tag] || 0) + 1;
           idx = counters[parentPath][event.tag];
         } else {
           const depth = currentStack.length;
@@ -155,10 +264,24 @@ parseXlinkLabel(attrs) {
           counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
           idx = counters[depth][event.tag];
         }
-        const { attrName, attrValue } = this.selectPreferredAttribute(event.attrs, config.preferredAttributes);
-        currentStack.push({ tag: event.tag, idx, customIndex: event.customIndex, customIndexRaw: event.customIndexRaw, attrName, attrValue,attrs: event.attrs });
+        const { attrName, attrValue } = this.selectPreferredAttribute(
+          event.attrs,
+          config.preferredAttributes
+        );
+        currentStack.push({
+          tag: event.tag,
+          idx,
+          customIndex: event.customIndex,
+          customIndexRaw: event.customIndexRaw,
+          attrName,
+          attrValue,
+          attrs: event.attrs,
+        });
       } else if (event.type === "close") {
-        if (currentStack.length > 0 && currentStack[currentStack.length - 1].tag === event.tag) {
+        if (
+          currentStack.length > 0 &&
+          currentStack[currentStack.length - 1].tag === event.tag
+        ) {
           // If the cursor is right on the closing tag, the stack *before* popping is the correct one.
           if (event.pos >= offset && !targetStack.length) {
             targetStack = [...currentStack];
@@ -169,14 +292,15 @@ parseXlinkLabel(attrs) {
     }
     // If the loop finished and we never set a target (e.g., cursor at end of file), use the final stack.
     if (!targetStack.length && currentStack.length > 0) {
-        targetStack = [...currentStack];
+      targetStack = [...currentStack];
     }
     return { stack: targetStack };
   }
-  
+
   selectPreferredAttribute(attrs, preferredList = []) {
     for (const preferred of preferredList) {
-      if (attrs[preferred]) return { attrName: preferred, attrValue: attrs[preferred] };
+      if (attrs[preferred])
+        return { attrName: preferred, attrValue: attrs[preferred] };
     }
     return { attrName: null, attrValue: null };
   }
@@ -194,8 +318,10 @@ parseXlinkLabel(attrs) {
   }
 
   generateXPath(path, config) {
-    if (!path || path.length === 0) return '';
-    const segments = path.map((node, index) => this.generateXPathSegment(node, index, path.length, config));
+    if (!path || path.length === 0) return "";
+    const segments = path.map((node, index) =>
+      this.generateXPathSegment(node, index, path.length, config)
+    );
     return "/" + segments.join("/");
   }
 
@@ -207,84 +333,117 @@ parseXlinkLabel(attrs) {
     return segment;
   }
 
-generateAttributePredicate(node, config) {
-  if (!node.attrName || !node.attrValue || !config.mode.includeAttributes) return "";
-  
-  // Use template if provided
-  if (config.predicateTemplate) {
-    const escapedValue = this.escapeAttributeValue(node.attrValue);
-    
-    // Replace template tokens
-    let predicate = config.predicateTemplate;
-    
-    // Basic tokens
-    predicate = predicate.replace(/{at}/g, '@');
-    predicate = predicate.replace(/{tag}/g, node.tag);
-    predicate = predicate.replace(/{attr1}/g, node.attrName);
-    predicate = predicate.replace(/{attr1V}/g, escapedValue);
-    predicate = predicate.replace(/{idx}/g, node.idx);
-    
-    // Advanced tokens for all attributes
-    if (node.attrs) {
-      // Replace {attr:name} with specific attribute values
-      predicate = predicate.replace(/{attr:(\w+)}/g, (match, attrName) => {
-        return node.attrs[attrName] ? this.escapeAttributeValue(node.attrs[attrName]) : '';
-      });
-      
-      // {attrs} - all attributes as conditions
-      if (predicate.includes('{attrs}')) {
-        const allAttrs = Object.entries(node.attrs)
-          .map(([k, v]) => `@${k}='${this.escapeAttributeValue(v)}'`)
-          .join(' and ');
-        predicate = predicate.replace(/{attrs}/g, allAttrs);
+  generateAttributePredicate(node, config) {
+    if (!node.attrName || !node.attrValue || !config.mode.includeAttributes)
+      return "";
+
+    // Use template if provided
+    if (config.predicateTemplate) {
+      const escapedValue = this.escapeAttributeValue(node.attrValue);
+
+      // Replace template tokens
+      let predicate = config.predicateTemplate;
+
+      // Basic tokens
+      predicate = predicate.replace(/{at}/g, "@");
+      predicate = predicate.replace(/{tag}/g, node.tag);
+      predicate = predicate.replace(/{attr1}/g, node.attrName);
+      predicate = predicate.replace(/{attr1V}/g, escapedValue);
+      predicate = predicate.replace(/{idx}/g, node.idx);
+
+      // Advanced tokens for all attributes
+      if (node.attrs) {
+        // Replace {attr:name} with specific attribute values
+        predicate = predicate.replace(/{attr:(\w+)}/g, (match, attrName) => {
+          return node.attrs[attrName]
+            ? this.escapeAttributeValue(node.attrs[attrName])
+            : "";
+        });
+
+        // {attrs} - all attributes as conditions
+        if (predicate.includes("{attrs}")) {
+          const allAttrs = Object.entries(node.attrs)
+            .map(([k, v]) => `@${k}='${this.escapeAttributeValue(v)}'`)
+            .join(" and ");
+          predicate = predicate.replace(/{attrs}/g, allAttrs);
+        }
+
+        // {attrCount} - number of attributes
+        predicate = predicate.replace(
+          /{attrCount}/g,
+          Object.keys(node.attrs).length
+        );
       }
-      
-      // {attrCount} - number of attributes
-      predicate = predicate.replace(/{attrCount}/g, Object.keys(node.attrs).length);
+
+      // Position tokens
+      predicate = predicate.replace(/{pos}/g, node.idx);
+      predicate = predicate.replace(/{lastPos}/g, `last()`);
+      predicate = predicate.replace(
+        /{isFirst}/g,
+        node.idx === 1 ? "true()" : "false()"
+      );
+      predicate = predicate.replace(/{isLast}/g, `position()=last()`);
+
+      // xlink tokens
+      if (node.customIndex !== undefined) {
+        predicate = predicate.replace(/{xllv}/g, node.customIndexRaw || "");
+        predicate = predicate.replace(/{xllvI}/g, node.customIndex);
+      }
+
+      // String manipulation tokens
+      predicate = predicate.replace(
+        /{attr1Lower}/g,
+        node.attrName.toLowerCase()
+      );
+      predicate = predicate.replace(
+        /{attr1Upper}/g,
+        node.attrName.toUpperCase()
+      );
+      predicate = predicate.replace(
+        /{attr1VLower}/g,
+        escapedValue.toLowerCase()
+      );
+      predicate = predicate.replace(
+        /{attr1VUpper}/g,
+        escapedValue.toUpperCase()
+      );
+
+      // Conditional tokens
+      predicate = predicate.replace(
+        /{if:([^:]+):([^:]+):([^}]+)}/g,
+        (match, condition, ifTrue, ifFalse) => {
+          // Simple condition evaluation
+          if (condition === "hasId") return node.attrs?.id ? ifTrue : ifFalse;
+          if (condition === "hasClass")
+            return node.attrs?.class ? ifTrue : ifFalse;
+          if (condition === "isFirst") return node.idx === 1 ? ifTrue : ifFalse;
+          return ifFalse;
+        }
+      );
+
+      return predicate;
     }
-    
-    // Position tokens
-    predicate = predicate.replace(/{pos}/g, node.idx);
-    predicate = predicate.replace(/{lastPos}/g, `last()`);
-    predicate = predicate.replace(/{isFirst}/g, node.idx === 1 ? 'true()' : 'false()');
-    predicate = predicate.replace(/{isLast}/g, `position()=last()`);
-    
-    // xlink tokens
-    if (node.customIndex !== undefined) {
-      predicate = predicate.replace(/{xllv}/g, node.customIndexRaw || '');
-      predicate = predicate.replace(/{xllvI}/g, node.customIndex);
-    }
-    
-    // String manipulation tokens
-    predicate = predicate.replace(/{attr1Lower}/g, node.attrName.toLowerCase());
-    predicate = predicate.replace(/{attr1Upper}/g, node.attrName.toUpperCase());
-    predicate = predicate.replace(/{attr1VLower}/g, escapedValue.toLowerCase());
-    predicate = predicate.replace(/{attr1VUpper}/g, escapedValue.toUpperCase());
-    
-    // Conditional tokens
-    predicate = predicate.replace(/{if:([^:]+):([^:]+):([^}]+)}/g, (match, condition, ifTrue, ifFalse) => {
-      // Simple condition evaluation
-      if (condition === 'hasId') return node.attrs?.id ? ifTrue : ifFalse;
-      if (condition === 'hasClass') return node.attrs?.class ? ifTrue : ifFalse;
-      if (condition === 'isFirst') return node.idx === 1 ? ifTrue : ifFalse;
-      return ifFalse;
-    });
-    
-    return predicate;
+
+    // Default format if no template
+    const escapedValue = this.escapeAttributeValue(node.attrValue);
+    return `[@${node.attrName}='${escapedValue}']`;
   }
-  
-  // Default format if no template
-  const escapedValue = this.escapeAttributeValue(node.attrValue);
-  return `[@${node.attrName}='${escapedValue}']`;
-}
-  
+
   generateIndex(node, isLeaf, config) {
-    if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex)) return "";
-    const index = config.useXlinkLabelIndex && node.customIndex != null ? node.customIndex : node.idx;
-    if ((config.skipSingleIndex && index === 1) || (config.ignoreTags && config.ignoreTags.has(node.tag) && index === 1)) return "";
+    if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex))
+      return "";
+    const index =
+      config.useXlinkLabelIndex && node.customIndex != null
+        ? node.customIndex
+        : node.idx;
+    if (
+      (config.skipSingleIndex && index === 1) ||
+      (config.ignoreTags && config.ignoreTags.has(node.tag) && index === 1)
+    )
+      return "";
     return `[${index}]`;
   }
-  
+
   escapeAttributeValue(value) {
     return String(value).replace(/'/g, "&apos;");
   }

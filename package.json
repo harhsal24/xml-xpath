@@ -21,7 +21,10 @@
     "onCommand:xmlXpath.toggleSkipSingleIndex",
     "onCommand:xmlXpath.toggleUseXlinkLabelIndex",
     "onCommand:xmlXpath.toggleParentScopedIndexing",
-    "onCommand:xmlXpath.toggleIgnoreParentSegment"
+    "onCommand:xmlXpath.toggleIgnoreParentSegment",
+    "onCommand:xmlXpath.setXlinkLabelPattern",
+    "onCommand:xmlXpath.setTemplate",
+    "onCommand:xmlXpath.searchWithXPath"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -85,14 +88,29 @@
         "command": "xmlXpath.toggleIgnoreParentSegment",
         "title": "XML XPath: Toggle Ignore Parent Segment",
         "category": "XML XPath"
-      }
+      },
+      {
+        "command": "xmlXpath.setXlinkLabelPattern",
+        "title": "XML XPath: Set xlink:label Pattern",
+        "category": "XML XPath"
+      },
+      {
+  "command": "xmlXpath.searchWithXPath",
+  "title": "XML XPath: Search with XPath",
+  "category": "XML XPath"
+}
     ],
     "keybindings": [
       {
         "key": "ctrl+shift+c",
         "command": "xmlXpath.copyXPath",
         "when": "editorTextFocus && editorLangId == xml"
-      }
+      },
+      {
+  "key": "ctrl+shift+f",
+  "command": "xmlXpath.searchWithXPath",
+  "when": "editorTextFocus && editorLangId == xml"
+}
     ],
     "menus": {
       "editor/context": [
@@ -188,6 +206,14 @@
           "default": 1000000,
           "minimum": 10000,
           "description": "Maximum file size (in bytes) for full document parsing. Files larger than this will use partial parsing for performance. Default: 1MB."
+        },
+        "xmlXpath.xlinkLabelPattern": {
+          "type": "object",
+          "default": {
+            "type": "any",
+            "pattern": ""
+          },
+          "description": "Pattern for extracting numbers from xlink:label values"
         }
       }
     }
