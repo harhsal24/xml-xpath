@@ -32,6 +32,8 @@ class XPathBuilder {
       ignoreParentSegment: false,
       predicateTemplate: "[@{attr1}='{attr1V}']",
       xlinkLabelPattern: { type: "any", pattern: "" },
+      forceIndexOneFor: new Set(),
+      exceptionsToIndexOneForcing: new Set(),
     };
   }
 
@@ -429,24 +431,61 @@ $$\\]>         # Closing ]]> (Corrected)
     return `[@${node.attrName}='${escapedValue}']`;
   }
 
-  generateIndex(node, isLeaf, config) {
-    if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex))
-      return "";
-    const index =
-      config.useXlinkLabelIndex && node.customIndex != null
-        ? node.customIndex
-        : node.idx;
-    if (
-      (config.skipSingleIndex && index === 1) ||
-      (config.ignoreTags && config.ignoreTags.has(node.tag) && index === 1)
-    )
-      return "";
-    return `[${index}]`;
+generateIndex(node, isLeaf, config) {
+  if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex))
+    return "";
+  
+  const index =
+    config.useXlinkLabelIndex && node.customIndex != null
+      ? node.customIndex
+      : node.idx;
+  
+  // FIRST: Check exceptions - these ALWAYS override everything else
+  // If tag is in exceptions AND index is 1, never show [1]
+  if (index === 1 && 
+      config.exceptionsToIndexOneForcing && 
+      config.exceptionsToIndexOneForcing.has(node.tag)) {
+    return "";
   }
-
-  escapeAttributeValue(value) {
-    return String(value).replace(/'/g, "&apos;");
+  
+  // For index [1] handling
+  if (index === 1) {
+    // If skipSingleIndex is ON (true), hide [1] by default
+    if (config.skipSingleIndex) {
+      // But check if this tag is forced to show [1]
+      if (config.forceIndexOneFor && config.forceIndexOneFor.has(node.tag)) {
+        return "[1]";
+      }
+      // Also check ignoreTags
+      if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
+        return "";
+      }
+      return ""; // Skip [1] by default when skipSingleIndex is ON
+    } else {
+      // skipSingleIndex is OFF (false)
+      
+      // If forceIndexOneFor is empty, show [1] for all (except exceptions already handled)
+      if (!config.forceIndexOneFor || config.forceIndexOneFor.size === 0) {
+        return "[1]";
+      }
+      
+      // If forceIndexOneFor has specific tags, only show [1] for those
+      if (config.forceIndexOneFor.has(node.tag)) {
+        return "[1]";
+      }
+      
+      // Check ignoreTags
+      if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
+        return "";
+      }
+      
+      return ""; // Don't show [1] for non-forced tags when forceIndexOneFor is not empty
+    }
   }
+  
+  // For all other indices (not 1), always show
+  return `[${index}]`;
+}
 }
 
 module.exports = XPathBuilder;

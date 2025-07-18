@@ -95,10 +95,20 @@
         "category": "XML XPath"
       },
       {
-  "command": "xmlXpath.searchWithXPath",
-  "title": "XML XPath: Search with XPath",
-  "category": "XML XPath"
-}
+        "command": "xmlXpath.searchWithXPath",
+        "title": "XML XPath: Search with XPath",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.setForceIndexOneFor",
+        "title": "XML XPath: Set Force Index [1] Tags",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.setExceptionsToIndexOneForcing",
+        "title": "XML XPath: Set Exceptions to Force Index [1]",
+        "category": "XML XPath"
+      }
     ],
     "keybindings": [
       {
@@ -107,10 +117,10 @@
         "when": "editorTextFocus && editorLangId == xml"
       },
       {
-  "key": "ctrl+shift+f",
-  "command": "xmlXpath.searchWithXPath",
-  "when": "editorTextFocus && editorLangId == xml"
-}
+        "key": "ctrl+shift+f",
+        "command": "xmlXpath.searchWithXPath",
+        "when": "editorTextFocus && editorLangId == xml"
+      }
     ],
     "menus": {
       "editor/context": [
@@ -214,6 +224,22 @@
             "pattern": ""
           },
           "description": "Pattern for extracting numbers from xlink:label values"
+        },
+        "xmlXpath.forceIndexOneFor": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Tags that should always show index [1] (when skipSingleIndex is false). Empty array means no forcing."
+        },
+        "xmlXpath.exceptionsToIndexOneForcing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Tags that are exceptions to forceIndexOneFor - these will never show [1]."
         }
       }
     }

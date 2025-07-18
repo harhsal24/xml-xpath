@@ -17,6 +17,7 @@ const xpathBuilder = new XPathBuilder();
 // to use the real VS Code API. This is a clean way to inject dependencies.
 xpathBuilder.loadConfiguration = function () {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  
   return {
     parentTag: cfg.get("parentTag", null),
     mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
@@ -32,6 +33,8 @@ xpathBuilder.loadConfiguration = function () {
       type: "any",
       pattern: "",
     }),
+    forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
+    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", []))
   };
 };
 
@@ -94,6 +97,26 @@ function registerCommands(context) {
     "xmlXpath.setTemplate": setPredicateTemplate,
     "xmlXpath.setXlinkLabelPattern": setXlinkLabelPattern,
     "xmlXpath.searchWithXPath": searchWithXPath,
+    "xmlXpath.setForceIndexOneFor": () =>
+  updateConfig(
+    "forceIndexOneFor",
+    "Tags to force index [1] (comma-separated, e.g., SECTION,PARAGRAPH)",
+    (val) =>
+      val
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+  ),
+"xmlXpath.setExceptionsToIndexOneForcing": () =>
+  updateConfig(
+    "exceptionsToIndexOneForcing",
+    "Tags that are exceptions to force index [1] (comma-separated, e.g., SUB_SECTION)",
+    (val) =>
+      val
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+  ),
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -239,6 +262,8 @@ async function copyUniversalXPath() {
         ignoreParentSegment: false,
         predicateTemplate: "[@{attr1}='{attr1V}']", // Standard format
         xlinkLabelPattern: { type: "any", pattern: "" },
+          forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),  
+    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", []))  
       };
     };
     
