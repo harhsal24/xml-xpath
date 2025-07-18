@@ -124,23 +124,27 @@ $$\\]>         # Closing ]]> (Corrected)
     return processed;
   }
 
-  parseXMLToken(match, config) {
-    const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
-    const pos = match.index;
-    if (closeSlash) {
-      return { type: "close", tag, pos: pos + fullMatch.length };
-    }
-    const attrs = this.parseAttributes(attrsText || "");
-    const xlinkData = this.parseXlinkLabel(attrs, config);
-    return {
-      type: "open",
-      tag,
-      attrs,
-      pos,
-      selfClose: !!selfCloseSlash,
-      ...xlinkData,
-    };
+// In the tokenizeXML method, make sure event parsing includes xlink processing
+ parseXMLToken(match, config) {
+  const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
+  const pos = match.index;
+  
+  if (closeSlash) {
+    return { type: "close", tag, pos: pos + fullMatch.length };
   }
+  
+  const attrs = this.parseAttributes(attrsText || "");
+  const xlinkData = this.parseXlinkLabel(attrs, config);
+  
+  return {
+    type: "open",
+    tag,
+    attrs,
+    pos,
+    selfClose: !!selfCloseSlash,
+    ...xlinkData, // This includes customIndex and customIndexRaw
+  };
+}
 
   parseAttributes(attrsText) {
     const attrs = {};

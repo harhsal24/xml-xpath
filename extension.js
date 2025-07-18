@@ -17,7 +17,7 @@ const xpathBuilder = new XPathBuilder();
 // to use the real VS Code API. This is a clean way to inject dependencies.
 xpathBuilder.loadConfiguration = function () {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  
+
   return {
     parentTag: cfg.get("parentTag", null),
     mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
@@ -34,29 +34,43 @@ xpathBuilder.loadConfiguration = function () {
       pattern: "",
     }),
     forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
-    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", [])),
+    exceptionsToIndexOneForcing: new Set(
+      cfg.get("exceptionsToIndexOneForcing", [])
+    ),
     useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", false), // ADD THIS
-    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", "") // ADD THIS
+    attributeBasedIndexingAttribute: cfg.get(
+      "attributeBasedIndexingAttribute",
+      ""
+    ), // ADD THIS
   };
 };
 
 function activate(context) {
-  statusBarItem = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    100
-  );
-  statusBarItem.command = "xmlXpath.copyXPath";
-  context.subscriptions.push(statusBarItem);
+  try {
+    console.log('XML XPath extension is activating...');
+    
+    statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      100
+    );
+    statusBarItem.command = "xmlXpath.copyXPath";
+    context.subscriptions.push(statusBarItem);
 
-  registerCommands(context);
+    registerCommands(context);
 
-  const debouncedUpdate = debounce(update, 150);
-  context.subscriptions.push(
-    vscode.window.onDidChangeTextEditorSelection(debouncedUpdate)
-  );
-  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(update));
+    const debouncedUpdate = debounce(update, 150);
+    context.subscriptions.push(
+      vscode.window.onDidChangeTextEditorSelection(debouncedUpdate)
+    );
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(update));
 
-  update();
+    update();
+    
+    console.log('XML XPath extension activated successfully');
+  } catch (error) {
+    console.error('Error activating XML XPath extension:', error);
+    vscode.window.showErrorMessage(`Failed to activate XML XPath: ${error.message}`);
+  }
 }
 
 function registerCommands(context) {
@@ -85,7 +99,7 @@ function registerCommands(context) {
             .filter(Boolean)
       ),
     "xmlXpath.copyXPath": copyXPath,
-    "xmlXpath.copyUniversalXPath": copyUniversalXPath, 
+    "xmlXpath.copyUniversalXPath": copyUniversalXPath,
     "xmlXpath.toggleDisableLeafIndex": () =>
       toggleConfig("disableLeafIndex", "Disable Leaf Index"),
     "xmlXpath.toggleSkipSingleIndex": () =>
@@ -121,7 +135,8 @@ function registerCommands(context) {
       ),
     "xmlXpath.toggleAttributeBasedIndexing": () =>
       toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
-    "xmlXpath.setAttributeBasedIndexingAttribute": setAttributeBasedIndexingAttribute
+    "xmlXpath.setAttributeBasedIndexingAttribute":
+      setAttributeBasedIndexingAttribute,
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -134,33 +149,42 @@ async function setAttributeBasedIndexingAttribute() {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const current = cfg.get("attributeBasedIndexingAttribute", "");
   const preferredAttrs = cfg.get("preferredAttributes", []);
-  
+
   // Provide quick pick with preferred attributes
-  const items = preferredAttrs.map(attr => ({
+  const items = preferredAttrs.map((attr) => ({
     label: attr,
-    description: "Preferred attribute"
+    description: "Preferred attribute",
   }));
-  items.push({ label: "Custom...", description: "Enter custom attribute name" });
-  
-  const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: "Select attribute for indexing"
+  items.push({
+    label: "Custom...",
+    description: "Enter custom attribute name",
   });
-  
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select attribute for indexing",
+  });
+
   if (!pick) return;
-  
+
   let value = pick.label;
   if (value === "Custom...") {
     value = await vscode.window.showInputBox({
       prompt: "Attribute name for attribute-based indexing",
       value: current,
-      placeHolder: "e.g., ValuationType, type, name"
+      placeHolder: "e.g., ValuationType, type, name",
     });
   }
-  
+
   if (value) {
-    await cfg.update("attributeBasedIndexingAttribute", value, vscode.ConfigurationTarget.Global);
+    await cfg.update(
+      "attributeBasedIndexingAttribute",
+      value,
+      vscode.ConfigurationTarget.Global
+    );
     update();
-    vscode.window.showInformationMessage(`Attribute-based indexing will use: ${value}`);
+    vscode.window.showInformationMessage(
+      `Attribute-based indexing will use: ${value}`
+    );
   }
 }
 
@@ -175,124 +199,211 @@ async function findElementByXPath(editor, xpath) {
     throw new Error("Invalid XPath format");
   }
 
-  // Tokenize the XML
+  // Tokenize the XML with configuration
   const events = xpathBuilder.tokenizeXML(xml, config);
   if (!events) {
     throw new Error("Failed to parse XML");
   }
 
-  // Search for matching element
-  return searchForElement(events, segments, xml);
+  // Search for matching element with configuration
+  return searchForElement(events, segments, xml, config);
 }
 
+const REGEX_PATTERNS = {
+  // Matches anything inside square brackets: “[ ... ]”
+  predicate: /\[([^\]]+)\]/g,
 
+  // Matches a pure number (position)
+  position: /^\d+$/,
 
-// This version uses backticks (template literals) to store the regex patterns.
+  // Matches @attr="value" or attr='value'
+  attribute: /^@?([^=\s]+)\s*=\s*['"]([^'"]*)['"]/,
+
+  // contains(@attr, 'value') — built from a string so we can strip whitespace/comments
+  contains: new RegExp(
+    `
+      contains            # contains function
+      \\s*\\(\\s*         # opening parenthesis
+      @([^,)]+)           # attribute name
+      ,\\s*               # comma
+      ['"]([^'"]+)['"]    # quoted value
+      \\s*\\)             # closing parenthesis
+    `.replace(/\s+|#.*/g, ""), // remove whitespace/comments
+    ""
+  ),
+
+  // “test” at end of line
+  endOfLine: new RegExp(
+    `
+      test                # the word “test”
+      $                   # end of line
+    `.replace(/\s+|#.*/g, ""),
+    ""
+  ),
+
+  // literal dollar sign then digits
+  dollarAmount: new RegExp(
+    `
+      \\$                 # literal $
+      (\\d+)              # one or more digits
+    `.replace(/\s+|#.*/g, ""),
+    ""
+  ),
+
+  // text()="..."
+  text: /text\(\)\s*=\s*['"]([^'"]+)['"]/,
+
+  // position()=n
+  positionFunc: /position\(\)\s*=\s*(\d+)/,
+};
+
 function parseXPath(xpath) {
-    // Remove leading slash and split by /
-    const parts = xpath.substring(1).split("/");
-    const segments = [];
+  console.log(`Parsing XPath: ${xpath}`);
 
-    // --- Step 1: Store all regular expression patterns in string variables using backticks. ---
-    // The escaping rule is the same as for single quotes: double backslashes `\\`.
-    const predicatePattern = `\
-$$
-([^\\[\
-$$]+)\\]`;
-    const positionOnlyPattern = `^\\d+$`;
-    const attributePattern = `^@?([^=\\s]+)\\s*=\\s*['"]([^'"]*)['"]`;
+  // Remove leading slash and split by /
+  const parts = xpath.substring(1).split("/");
+  const segments = [];
 
-    // Here's an example of how backticks can improve readability for complex patterns:
-    const containsPattern = `
-        contains\\(       # Match the literal text "contains("
-        @([^,)]+),       # Match and capture the attribute name (anything but a comma or parenthesis)
-        \\s*['"]          # Match optional whitespace and a quote
-        ([^'"]+)         # Match and capture the attribute value
-        ['"]\\)           # Match the closing quote and parenthesis
-    `.replace(/\s/g, ''); // Remove all whitespace to make the regex valid
+  for (const part of parts) {
+    console.log(`\nProcessing part: "${part}"`);
 
-    const textPattern = `text\$\$\\s*=\\s*['"]([^'"]+)['"]`;
-    const positionFuncPattern = `position\$\$\\s*=\\s*(\\d+)`;
+    // Find the first [ to separate tag name from predicates
+    const bracketIndex = part.indexOf("[");
 
-
-    for (const part of parts) {
-        const tagMatch = part.match(/^([^[\]]+)/);
-        if (!tagMatch) continue;
-
-        const tagName = tagMatch[1];
-        const segment = { tagName, predicates: [] };
-
-        const predicateRegex = new RegExp(predicatePattern, 'g');
-        let predMatch;
-
-        while ((predMatch = predicateRegex.exec(part))) {
-            const predContent = predMatch[1];
-
-            if (new RegExp(positionOnlyPattern).test(predContent)) {
-                segment.predicates.push({
-                    type: "position",
-                    value: parseInt(predContent, 10),
-                });
-            }
-            else if (predContent.includes("=")) {
-                const attrMatch = predContent.match(new RegExp(attributePattern));
-                if (attrMatch) {
-                    segment.predicates.push({
-                        type: "attribute",
-                        name: attrMatch[1],
-                        value: attrMatch[2],
-                    });
-                }
-            }
-            else if (predContent.startsWith("contains")) {
-                const containsMatch = predContent.match(new RegExp(containsPattern));
-                if (containsMatch) {
-                    segment.predicates.push({
-                        type: "contains",
-                        target: containsMatch[1],
-                        value: containsMatch[2],
-                    });
-                }
-            }
-            else if (predContent.startsWith("text()")) {
-                const textMatch = predContent.match(new RegExp(textPattern));
-                if (textMatch) {
-                    segment.predicates.push({
-                        type: "text",
-                        value: textMatch[1],
-                    });
-                }
-            }
-            else if (predContent.startsWith("position()")) {
-                const posMatch = predContent.match(new RegExp(positionFuncPattern));
-                if (posMatch) {
-                    segment.predicates.push({
-                        type: "position",
-                        value: parseInt(posMatch[1], 10),
-                    });
-                }
-            }
-        }
-        segments.push(segment);
+    let tagName, predicatesPart;
+    if (bracketIndex === -1) {
+      // No predicates
+      tagName = part;
+      predicatesPart = "";
+    } else {
+      // Has predicates
+      tagName = part.substring(0, bracketIndex);
+      predicatesPart = part.substring(bracketIndex);
     }
-    return segments;
+
+    console.log(`Tag name: "${tagName}"`);
+    console.log(`Predicates part: "${predicatesPart}"`);
+
+    const segment = { tagName, predicates: [] };
+
+    if (predicatesPart) {
+      // Extract all [...] using regex - FIXED: Use \[ instead of $$
+      const predicateRegex = /\[([^\]]+)\]/g;
+      let predicateMatch;
+
+      while ((predicateMatch = predicateRegex.exec(predicatesPart)) !== null) {
+        const predContent = predicateMatch[1].trim();
+        console.log(`Found predicate: "${predContent}"`);
+
+        // Check if it's just a number (position)
+        if (/^\d+$/.test(predContent)) {
+          segment.predicates.push({
+            type: "position",
+            value: parseInt(predContent, 10),
+          });
+          console.log(`  -> Parsed as position: ${predContent}`);
+        }
+        // Check for attribute predicates
+        else if (predContent.includes("=")) {
+          // Match @attribute='value' or attribute='value'
+          const attrMatch = predContent.match(
+            /^@?([^=\s]+)\s*=\s*['"]([^'"]*)['"]/
+          );
+          if (attrMatch) {
+            segment.predicates.push({
+              type: "attribute",
+              name: attrMatch[1],
+              value: attrMatch[2],
+            });
+            console.log(
+              `  -> Parsed as attribute: ${attrMatch[1]}='${attrMatch[2]}'`
+            );
+          }
+        }
+        // Handle contains()
+        else if (predContent.startsWith("contains")) {
+          // FIXED: Removed $ from the regex pattern
+          const containsMatch = predContent.match(
+            /contains\s*\(\s*@([^,)]+),\s*['"]([^'"]+)['"]\s*\)/
+          );
+          if (containsMatch) {
+            segment.predicates.push({
+              type: "contains",
+              target: containsMatch[1],
+              value: containsMatch[2],
+            });
+            console.log(
+              `  -> Parsed as contains: ${containsMatch[1]} contains '${containsMatch[2]}'`
+            );
+          }
+        }
+        // Handle text()
+        else if (predContent.startsWith("text()")) {
+          const textMatch = predContent.match(
+            /text\(\)\s*=\s*['"]([^'"]+)['"]/
+          );
+          if (textMatch) {
+            segment.predicates.push({
+              type: "text",
+              value: textMatch[1],
+            });
+            console.log(`  -> Parsed as text: '${textMatch[1]}'`);
+          }
+        }
+        // Handle position()
+        else if (predContent.startsWith("position()")) {
+          const posMatch = predContent.match(/position\(\)\s*=\s*(\d+)/);
+          if (posMatch) {
+            segment.predicates.push({
+              type: "position",
+              value: parseInt(posMatch[1], 10),
+            });
+            console.log(`  -> Parsed as position function: ${posMatch[1]}`);
+          }
+        }
+        // Handle last()
+        else if (predContent === "last()") {
+          segment.predicates.push({
+            type: "last",
+          });
+          console.log(`  -> Parsed as last()`);
+        }
+        // Handle other predicates
+        else {
+          segment.predicates.push({
+            type: "other",
+            value: predContent,
+          });
+          console.log(`  -> Parsed as other: ${predContent}`);
+        }
+      }
+    }
+
+    segments.push(segment);
+  }
+
+  console.log("\nFinal parsed segments:", JSON.stringify(segments, null, 2));
+  return segments;
 }
 
 async function copyUniversalXPath() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isXmlLanguage(editor.document)) return;
-  
+
   try {
     // Save current configuration loader function
     const originalLoader = xpathBuilder.loadConfiguration;
-    
-    // Override with universal settings
-    xpathBuilder.loadConfiguration = function() {
-      const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+
+    // Override with universal settings - FIXED: Keep attribute-based indexing if enabled
+    const currentConfig = originalLoader();
+    xpathBuilder.loadConfiguration = function () {
       return {
         parentTag: null,
         mode: { includeIndices: true, includeAttributes: true },
-        preferredAttributes: cfg.get("preferredAttributes", ['id', 'name']),
+        preferredAttributes: currentConfig.preferredAttributes || [
+          "id",
+          "name",
+        ],
         ignoreTags: new Set(),
         disableLeafIndex: false,
         skipSingleIndex: false,
@@ -303,20 +414,22 @@ async function copyUniversalXPath() {
         xlinkLabelPattern: { type: "any", pattern: "" },
         forceIndexOneFor: new Set(),
         exceptionsToIndexOneForcing: new Set(),
-        useAttributeBasedIndexing: false,
-        attributeBasedIndexingAttribute: ""
+        // FIXED: Preserve attribute-based indexing settings
+        useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
+        attributeBasedIndexingAttribute:
+          currentConfig.attributeBasedIndexingAttribute,
       };
     };
-    
+
     // Generate XPath with universal settings
     const xpath = xpathBuilder.buildXPathRegex(
       editor.document,
       editor.selection.active
     );
-    
+
     // Restore original configuration loader
     xpathBuilder.loadConfiguration = originalLoader;
-    
+
     if (xpath) {
       await vscode.env.clipboard.writeText(xpath);
       vscode.window.showInformationMessage(`Copied universal XPath: ${xpath}`);
@@ -327,84 +440,168 @@ async function copyUniversalXPath() {
   }
 }
 
-function searchForElement(events, xpathSegments, xml) {
+// 1. Fix the searchForElement function to properly handle attribute-based indexing
+function searchForElement(events, xpathSegments, xml, config) {
   const stack = [];
-  const counters = [];
   let bestMatch = null;
   let maxMatchedDepth = 0;
+
+  // Initialize counters exactly like in buildElementStack
+  const counters = config.useParentScopedIndices ? {} : [];
+  const attributeCounters = {};
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i];
 
     if (event.type === "open") {
-      // Update counters
       const depth = stack.length;
-      if (!counters[depth]) counters[depth] = {};
-      counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+      let idx;
 
-      const currentIndex = counters[depth][event.tag];
+      // Determine which attribute to use for indexing (from buildElementStack logic)
+      let indexingAttribute = null;
+      let indexingValue = null;
 
-      // Add to stack
+      if (config.useAttributeBasedIndexing) {
+        if (
+          config.preferredAttributes &&
+          config.preferredAttributes.length > 0
+        ) {
+          for (const attr of config.preferredAttributes) {
+            if (event.attrs && event.attrs[attr]) {
+              indexingAttribute = attr;
+              indexingValue = event.attrs[attr];
+              break;
+            }
+          }
+        }
+      }
+
+      // Calculate index based on mode (matching buildElementStack exactly)
+      if (
+        config.useAttributeBasedIndexing &&
+        indexingAttribute &&
+        indexingValue
+      ) {
+        // Attribute-based indexing
+        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
+
+        if (!attributeCounters[key]) {
+          attributeCounters[key] = 0;
+        }
+        attributeCounters[key]++;
+        idx = attributeCounters[key];
+      } else if (config.useParentScopedIndices) {
+        // Parent-scoped indexing
+        const parentPath = stack.map((e) => `${e.tag}[${e.index}]`).join("/");
+        if (!counters[parentPath]) counters[parentPath] = {};
+        counters[parentPath][event.tag] =
+          (counters[parentPath][event.tag] || 0) + 1;
+        idx = counters[parentPath][event.tag];
+      } else {
+        // Depth-based indexing
+        const depth = stack.length;
+        if (!counters[depth]) counters[depth] = {};
+        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+        idx = counters[depth][event.tag];
+      }
+
+      // Collect ALL preferred attributes for this element
+      const preferredAttrs = [];
+      if (event.attrs && config.preferredAttributes) {
+        for (const attrName of config.preferredAttributes) {
+          if (event.attrs[attrName]) {
+            preferredAttrs.push({
+              name: attrName,
+              value: event.attrs[attrName],
+            });
+          }
+        }
+      }
+
+      // Add to stack with all the same properties as buildElementStack
       stack.push({
         tag: event.tag,
-        index: currentIndex,
+        idx: idx,
+        index: idx, // Add both for compatibility
+        customIndex: event.customIndex,
+        customIndexRaw: event.customIndexRaw,
         attrs: event.attrs,
+        indexingAttribute: indexingAttribute,
+        indexingValue: indexingValue,
+        preferredAttrs: preferredAttrs,
         startOffset: event.pos,
         eventIndex: i,
       });
 
-      // Check how far we match
-      const matchDepth = getMatchDepth(stack, xpathSegments);
+      // Rest of the matching logic...
+      const matchResult = checkFullMatchWithConfig(
+        stack,
+        xpathSegments,
+        config
+      );
 
-      // If this is a better partial match, save it
-      if (matchDepth > maxMatchedDepth) {
-        maxMatchedDepth = matchDepth;
+      if (matchResult.depth > 0) {
+        console.log(
+          `Match depth: ${matchResult.depth}/${xpathSegments.length}, ` +
+            `isFullMatch: ${matchResult.isFullMatch}, ` +
+            `path: ${matchResult.matchedPath}`
+        );
+      }
 
-        // Find the end offset for the partially matched element
-        let endOffset = event.pos + event.tag.length + 2;
-        let openCount = 1;
+      // Update best match
+      if (matchResult.depth > maxMatchedDepth) {
+        maxMatchedDepth = matchResult.depth;
 
-        // Only look for closing tag if we're at the matched depth
-        if (matchDepth === stack.length) {
-          for (let j = i + 1; j < events.length; j++) {
-            if (events[j].tag === event.tag) {
+        const matchedElementIndex = matchResult.depth - 1;
+        if (matchedElementIndex >= 0 && matchedElementIndex < stack.length) {
+          const matchedElement = stack[matchedElementIndex];
+
+          let endOffset =
+            matchedElement.startOffset + matchedElement.tag.length + 2;
+          let openCount = 1;
+
+          for (let j = matchedElement.eventIndex + 1; j < events.length; j++) {
+            if (events[j].tag === matchedElement.tag) {
               if (events[j].type === "open") {
                 openCount++;
               } else if (events[j].type === "close") {
                 openCount--;
                 if (openCount === 0) {
-                  endOffset = events[j].pos;
+                  endOffset = events[j].pos + events[j].tag.length + 3;
                   break;
                 }
               }
             }
           }
-        }
 
-                bestMatch = {
-          tagName: event.tag,
-          startOffset: event.pos,
-          endOffset: endOffset,
-          attrs: event.attrs,
-          matchedDepth: matchDepth,
-          totalDepth: xpathSegments.length,
-          isPartial: matchDepth < xpathSegments.length,
-        };
+          bestMatch = {
+            tagName: matchedElement.tag,
+            startOffset: matchedElement.startOffset,
+            endOffset: endOffset,
+            attrs: matchedElement.attrs,
+            matchedDepth: matchResult.depth,
+            totalDepth: xpathSegments.length,
+            isPartial: !matchResult.isFullMatch,
+          };
+        }
       }
 
-      // Check if current path fully matches the XPath
-      if (matchesXPath(stack, xpathSegments)) {
-        // Find the end offset
-        let endOffset = event.pos + event.tag.length + 2;
+      // Check for full match
+      if (matchResult.isFullMatch) {
+        console.log("Full match found!");
+
+        const lastElement = stack[stack.length - 1];
+        let endOffset = lastElement.startOffset + lastElement.tag.length + 2;
         let openCount = 1;
+
         for (let j = i + 1; j < events.length; j++) {
-          if (events[j].tag === event.tag) {
+          if (events[j].tag === lastElement.tag) {
             if (events[j].type === "open") {
               openCount++;
             } else if (events[j].type === "close") {
               openCount--;
               if (openCount === 0) {
-                endOffset = events[j].pos;
+                endOffset = events[j].pos + events[j].tag.length + 3;
                 break;
               }
             }
@@ -412,25 +609,245 @@ function searchForElement(events, xpathSegments, xml) {
         }
 
         return {
-          tagName: event.tag,
-          startOffset: event.pos,
+          tagName: lastElement.tag,
+          startOffset: lastElement.startOffset,
           endOffset: endOffset,
-          attrs: event.attrs,
+          attrs: lastElement.attrs,
           matchedDepth: xpathSegments.length,
           totalDepth: xpathSegments.length,
           isPartial: false,
         };
       }
     } else if (event.type === "close") {
-      // Pop from stack
       if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) {
         stack.pop();
       }
     }
   }
 
-  // Return the best partial match if no full match was found
+  console.log(
+    `No full match found. Best match depth: ${maxMatchedDepth}/${xpathSegments.length}`
+  );
   return bestMatch;
+}
+
+// Helper function that considers configuration
+function checkFullMatchWithConfig(stack, xpathSegments, config) {
+  let depth = 0;
+  const matchedPath = [];
+
+  for (let i = 0; i < Math.min(stack.length, xpathSegments.length); i++) {
+    const stackItem = stack[i];
+    const xpathSegment = xpathSegments[i];
+
+    // Check tag name
+    if (stackItem.tag !== xpathSegment.tagName) {
+      console.log(
+        `Tag mismatch at depth ${i}: ${stackItem.tag} !== ${xpathSegment.tagName}`
+      );
+      break;
+    }
+
+    // Check all predicates
+    let allPredicatesMatch = true;
+    let pathPart = stackItem.tag;
+
+    for (const predicate of xpathSegment.predicates) {
+      if (predicate.type === "position") {
+        // Handle position based on configuration
+        let expectedIndex = predicate.value;
+        let actualIndex = stackItem.index;
+
+        // If using xlink:label indexing, check customIndex
+        if (config.useXlinkLabelIndex && stackItem.customIndex !== undefined) {
+          actualIndex = stackItem.customIndex;
+        }
+
+        if (actualIndex !== expectedIndex) {
+          console.log(
+            `Position mismatch at depth ${i}: element at index ${actualIndex} !== expected ${expectedIndex}`
+          );
+          allPredicatesMatch = false;
+          break;
+        }
+        pathPart += `[${predicate.value}]`;
+      } else if (predicate.type === "attribute") {
+        if (
+          !stackItem.attrs ||
+          stackItem.attrs[predicate.name] !== predicate.value
+        ) {
+          console.log(
+            `Attribute mismatch at depth ${i}: ${predicate.name}='${
+              stackItem.attrs?.[predicate.name] || "undefined"
+            }' !== '${predicate.value}'`
+          );
+          allPredicatesMatch = false;
+          break;
+        }
+        pathPart += `[@${predicate.name}='${predicate.value}']`;
+      }
+    }
+
+    if (!allPredicatesMatch) {
+      break;
+    }
+
+    matchedPath.push(pathPart);
+    depth++;
+  }
+
+  return {
+    depth: depth,
+    isFullMatch: depth === xpathSegments.length,
+    matchedPath: "/" + matchedPath.join("/"),
+  };
+}
+
+// 2. FIXED: Update checkFullMatch to consider attribute-based indexing
+function checkFullMatch(stack, xpathSegments, config) {
+  let depth = 0;
+  const matchedPath = [];
+
+  for (let i = 0; i < Math.min(stack.length, xpathSegments.length); i++) {
+    const stackItem = stack[i];
+    const xpathSegment = xpathSegments[i];
+
+    // Check tag name
+    if (stackItem.tag !== xpathSegment.tagName) {
+      console.log(
+        `Tag mismatch at depth ${i}: ${stackItem.tag} !== ${xpathSegment.tagName}`
+      );
+      break;
+    }
+
+    // Check all predicates
+    let allPredicatesMatch = true;
+    let pathPart = stackItem.tag;
+
+    for (const predicate of xpathSegment.predicates) {
+      if (predicate.type === "position") {
+        // FIXED: For attribute-based indexing, we need to check if the position
+        // matches the element's index in the attribute-based context
+        const expectedIndex = predicate.value;
+
+        // Check if this matches how we counted during building
+        if (
+          config.useAttributeBasedIndexing &&
+          config.attributeBasedIndexingAttribute &&
+          stackItem.attrs &&
+          stackItem.attrs[config.attributeBasedIndexingAttribute]
+        ) {
+          // For attribute-based indexing, the index should match elements
+          // with the same attribute value
+          if (stackItem.index !== expectedIndex) {
+            console.log(
+              `Attribute-based position mismatch at depth ${i}: element at index ${stackItem.index} !== expected ${expectedIndex}`
+            );
+            allPredicatesMatch = false;
+            break;
+          }
+        } else if (stackItem.index !== expectedIndex) {
+          console.log(
+            `Position mismatch at depth ${i}: element at index ${stackItem.index} !== expected ${expectedIndex}`
+          );
+          allPredicatesMatch = false;
+          break;
+        }
+        pathPart += `[${predicate.value}]`;
+      } else if (predicate.type === "attribute") {
+        if (
+          !stackItem.attrs ||
+          stackItem.attrs[predicate.name] !== predicate.value
+        ) {
+          console.log(
+            `Attribute mismatch at depth ${i}: ${predicate.name}='${
+              stackItem.attrs?.[predicate.name] || "undefined"
+            }' !== '${predicate.value}'`
+          );
+          allPredicatesMatch = false;
+          break;
+        }
+        pathPart += `[@${predicate.name}='${predicate.value}']`;
+      }
+    }
+
+    if (!allPredicatesMatch) {
+      break;
+    }
+
+    matchedPath.push(pathPart);
+    depth++;
+  }
+
+  return {
+    depth: depth,
+    isFullMatch: depth === xpathSegments.length,
+    matchedPath: "/" + matchedPath.join("/"),
+  };
+}
+
+// Helper function to check how deep the current stack matches the XPath
+function checkMatchDepth(stack, xpathSegments) {
+  let depth = 0;
+
+  for (let i = 0; i < Math.min(stack.length, xpathSegments.length); i++) {
+    const stackItem = stack[i];
+    const xpathSegment = xpathSegments[i];
+
+    // Check tag name
+    if (stackItem.tag !== xpathSegment.tagName) {
+      return depth;
+    }
+
+    // Check all predicates
+    let allPredicatesMatch = true;
+
+    for (const predicate of xpathSegment.predicates) {
+      if (predicate.type === "position") {
+        // For position predicates, check if we have the right index
+        // But we need to check this in context of any attribute predicates
+        const hasAttrPredicates = xpathSegment.predicates.some(
+          (p) => p.type === "attribute"
+        );
+
+        if (hasAttrPredicates) {
+          // First verify all attribute predicates match
+          const attrMatch = xpathSegment.predicates
+            .filter((p) => p.type === "attribute")
+            .every(
+              (p) => stackItem.attrs && stackItem.attrs[p.name] === p.value
+            );
+
+          if (!attrMatch) {
+            allPredicatesMatch = false;
+            break;
+          }
+        }
+
+        // Now check the position
+        if (stackItem.index !== predicate.value) {
+          allPredicatesMatch = false;
+          break;
+        }
+      } else if (predicate.type === "attribute") {
+        if (
+          !stackItem.attrs ||
+          stackItem.attrs[predicate.name] !== predicate.value
+        ) {
+          allPredicatesMatch = false;
+          break;
+        }
+      }
+    }
+
+    if (!allPredicatesMatch) {
+      return depth;
+    }
+
+    depth++;
+  }
+
+  return depth;
 }
 
 // Helper function to determine how deep the match goes
@@ -443,15 +860,42 @@ function getMatchDepth(stack, xpathSegments) {
 
     // Check tag name
     if (stackItem.tag !== xpathSegment.tagName) {
+      console.log(
+        `Tag mismatch at depth ${i}: ${stackItem.tag} !== ${xpathSegment.tagName}`
+      );
       break;
     }
 
-    // Check predicates
-    let predicatesMatch = true;
+    // Check ALL predicates
+    let allPredicatesMatch = true;
+
     for (const predicate of xpathSegment.predicates) {
       if (predicate.type === "position") {
-        if (stackItem.index !== predicate.value) {
-          predicatesMatch = false;
+        // For elements with attribute predicates, we need to check the actual counted index
+        const hasAttrPredicates = xpathSegment.predicates.some(
+          (p) => p.type === "attribute"
+        );
+
+        if (hasAttrPredicates) {
+          // Check if all attribute predicates match first
+          const attrPredicatesMatch = xpathSegment.predicates
+            .filter((p) => p.type === "attribute")
+            .every(
+              (p) => stackItem.attrs && stackItem.attrs[p.name] === p.value
+            );
+
+          if (!attrPredicatesMatch || stackItem.index !== predicate.value) {
+            console.log(
+              `Position mismatch at depth ${i}: ${stackItem.index} !== ${predicate.value} (with attributes)`
+            );
+            allPredicatesMatch = false;
+            break;
+          }
+        } else if (stackItem.index !== predicate.value) {
+          console.log(
+            `Position mismatch at depth ${i}: ${stackItem.index} !== ${predicate.value}`
+          );
+          allPredicatesMatch = false;
           break;
         }
       } else if (predicate.type === "attribute") {
@@ -459,13 +903,18 @@ function getMatchDepth(stack, xpathSegments) {
           !stackItem.attrs ||
           stackItem.attrs[predicate.name] !== predicate.value
         ) {
-          predicatesMatch = false;
+          console.log(
+            `Attribute mismatch at depth ${i}: ${predicate.name}='${
+              stackItem.attrs?.[predicate.name] || "undefined"
+            }' !== '${predicate.value}'`
+          );
+          allPredicatesMatch = false;
           break;
         }
       }
     }
 
-    if (!predicatesMatch) {
+    if (!allPredicatesMatch) {
       break;
     }
 
@@ -564,14 +1013,21 @@ function matchesXPath(stack, xpathSegments) {
     // Check tag name
     if (stackItem.tag !== xpathSegment.tagName) return false;
 
-    // Check predicates
+    // Check ALL predicates must match
     for (const predicate of xpathSegment.predicates) {
       if (predicate.type === "position") {
-        if (stackItem.index !== predicate.value) return false;
+        // THIS IS THE KEY FIX - check the actual index
+        if (stackItem.index !== predicate.value) {
+          console.log(
+            `Position mismatch: element index ${stackItem.index} !== expected ${predicate.value}`
+          );
+          return false;
+        }
       } else if (predicate.type === "attribute") {
-        // Add null check for attrs
+        // Check attribute exists and matches exactly
         if (
           !stackItem.attrs ||
+          !stackItem.attrs.hasOwnProperty(predicate.name) ||
           stackItem.attrs[predicate.name] !== predicate.value
         ) {
           return false;
@@ -869,14 +1325,27 @@ async function setMode() {
   }
 }
 
+// 3. FIXED: Update the copyXPath function to ensure config is loaded properly
 async function copyXPath() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isXmlLanguage(editor.document)) return;
+
   try {
+    // Ensure configuration is loaded fresh
+    const config = xpathBuilder.loadConfiguration();
+
+    // Debug logging
+    if (config.useAttributeBasedIndexing) {
+      console.log(
+        `Attribute-based indexing enabled with attribute: ${config.attributeBasedIndexingAttribute}`
+      );
+    }
+
     const xpath = xpathBuilder.buildXPathRegex(
       editor.document,
       editor.selection.active
     );
+
     if (xpath) {
       await vscode.env.clipboard.writeText(xpath);
       vscode.window.showInformationMessage(`Copied: ${xpath}`);
@@ -892,6 +1361,7 @@ function isXmlLanguage(document) {
   return xmlLanguages.includes(document.languageId);
 }
 
+// 6. ADDITIONAL: Enhanced debug logging for the update function
 function update() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isXmlLanguage(editor.document)) {
@@ -901,7 +1371,15 @@ function update() {
   try {
     const config = xpathBuilder.loadConfiguration();
 
-    // Debug: Show current config state
+    // Enhanced debug logging
+    if (config.useAttributeBasedIndexing) {
+      console.log(
+        `Attribute-based indexing is ENABLED with attribute: ${config.attributeBasedIndexingAttribute}`
+      );
+    } else {
+      console.log("Attribute-based indexing is DISABLED");
+    }
+
     if (config.useXlinkLabelIndex) {
       console.log("xlink:label indexing is ENABLED");
     }
@@ -910,6 +1388,7 @@ function update() {
       editor.document,
       editor.selection.active
     );
+
     if (xpath) {
       const displayXPath =
         xpath.length > 80 ? xpath.substring(0, 77) + "..." : xpath;
