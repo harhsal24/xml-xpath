@@ -108,7 +108,17 @@
         "command": "xmlXpath.setExceptionsToIndexOneForcing",
         "title": "XML XPath: Set Exceptions to Force Index [1]",
         "category": "XML XPath"
-      }
+      },
+{
+  "command": "xmlXpath.toggleAttributeBasedIndexing",
+  "title": "XML XPath: Toggle Attribute-Based Indexing",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.setAttributeBasedIndexingAttribute",
+  "title": "XML XPath: Set Attribute for Attribute-Based Indexing",
+  "category": "XML XPath"
+}
     ],
     "keybindings": [
       {
@@ -240,7 +250,17 @@
           },
           "default": [],
           "description": "Tags that are exceptions to forceIndexOneFor - these will never show [1]."
-        }
+        },
+"xmlXpath.useAttributeBasedIndexing": {
+  "type": "boolean",
+  "default": false,
+  "description": "When enabled, elements are indexed based on their attribute values. Elements with same tag but different attributes get separate index sequences."
+},
+"xmlXpath.attributeBasedIndexingAttribute": {
+  "type": "string",
+  "default": "",
+  "description": "The attribute to use for attribute-based indexing (e.g., 'ValuationType'). If empty, uses the first preferred attribute."
+}
       }
     }
   },

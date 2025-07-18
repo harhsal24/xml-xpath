@@ -34,7 +34,9 @@ xpathBuilder.loadConfiguration = function () {
       pattern: "",
     }),
     forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
-    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", []))
+    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", [])),
+    useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", false), // ADD THIS
+    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", "") // ADD THIS
   };
 };
 
@@ -98,29 +100,67 @@ function registerCommands(context) {
     "xmlXpath.setXlinkLabelPattern": setXlinkLabelPattern,
     "xmlXpath.searchWithXPath": searchWithXPath,
     "xmlXpath.setForceIndexOneFor": () =>
-  updateConfig(
-    "forceIndexOneFor",
-    "Tags to force index [1] (comma-separated, e.g., SECTION,PARAGRAPH)",
-    (val) =>
-      val
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-  ),
-"xmlXpath.setExceptionsToIndexOneForcing": () =>
-  updateConfig(
-    "exceptionsToIndexOneForcing",
-    "Tags that are exceptions to force index [1] (comma-separated, e.g., SUB_SECTION)",
-    (val) =>
-      val
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-  ),
+      updateConfig(
+        "forceIndexOneFor",
+        "Tags to force index [1] (comma-separated, e.g., SECTION,PARAGRAPH)",
+        (val) =>
+          val
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+      ),
+    "xmlXpath.setExceptionsToIndexOneForcing": () =>
+      updateConfig(
+        "exceptionsToIndexOneForcing",
+        "Tags that are exceptions to force index [1] (comma-separated, e.g., SUB_SECTION)",
+        (val) =>
+          val
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+      ),
+    "xmlXpath.toggleAttributeBasedIndexing": () =>
+      toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
+    "xmlXpath.setAttributeBasedIndexingAttribute": setAttributeBasedIndexingAttribute
   };
 
   for (const [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(name, handler));
+  }
+}
+
+// Add this new function:
+async function setAttributeBasedIndexingAttribute() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("attributeBasedIndexingAttribute", "");
+  const preferredAttrs = cfg.get("preferredAttributes", []);
+  
+  // Provide quick pick with preferred attributes
+  const items = preferredAttrs.map(attr => ({
+    label: attr,
+    description: "Preferred attribute"
+  }));
+  items.push({ label: "Custom...", description: "Enter custom attribute name" });
+  
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select attribute for indexing"
+  });
+  
+  if (!pick) return;
+  
+  let value = pick.label;
+  if (value === "Custom...") {
+    value = await vscode.window.showInputBox({
+      prompt: "Attribute name for attribute-based indexing",
+      value: current,
+      placeHolder: "e.g., ValuationType, type, name"
+    });
+  }
+  
+  if (value) {
+    await cfg.update("attributeBasedIndexingAttribute", value, vscode.ConfigurationTarget.Global);
+    update();
+    vscode.window.showInformationMessage(`Attribute-based indexing will use: ${value}`);
   }
 }
 
@@ -238,7 +278,6 @@ $$]+)\\]`;
     return segments;
 }
 
-// Add a new command for copying "universal" XPath that works across files
 async function copyUniversalXPath() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isXmlLanguage(editor.document)) return;
@@ -253,17 +292,19 @@ async function copyUniversalXPath() {
       return {
         parentTag: null,
         mode: { includeIndices: true, includeAttributes: true },
-        preferredAttributes: cfg.get("preferredAttributes", ['id', 'name']), // Use configured or common attributes
+        preferredAttributes: cfg.get("preferredAttributes", ['id', 'name']),
         ignoreTags: new Set(),
         disableLeafIndex: false,
         skipSingleIndex: false,
-        useXlinkLabelIndex: false, // Don't use xlink:label
+        useXlinkLabelIndex: false,
         useParentScopedIndices: false,
         ignoreParentSegment: false,
-        predicateTemplate: "[@{attr1}='{attr1V}']", // Standard format
+        predicateTemplate: "[@{attr1}='{attr1V}']",
         xlinkLabelPattern: { type: "any", pattern: "" },
-          forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),  
-    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", []))  
+        forceIndexOneFor: new Set(),
+        exceptionsToIndexOneForcing: new Set(),
+        useAttributeBasedIndexing: false,
+        attributeBasedIndexingAttribute: ""
       };
     };
     

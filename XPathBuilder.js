@@ -19,23 +19,25 @@ class XPathBuilder {
     this.parser = new XMLParser(parserOptions);
   }
 
-  loadConfiguration() {
-    return {
-      parentTag: null,
-      mode: { includeIndices: true, includeAttributes: true },
-      preferredAttributes: [],
-      ignoreTags: new Set(),
-      disableLeafIndex: false,
-      skipSingleIndex: false,
-      useXlinkLabelIndex: false,
-      useParentScopedIndices: false,
-      ignoreParentSegment: false,
-      predicateTemplate: "[@{attr1}='{attr1V}']",
-      xlinkLabelPattern: { type: "any", pattern: "" },
-      forceIndexOneFor: new Set(),
-      exceptionsToIndexOneForcing: new Set(),
-    };
-  }
+loadConfiguration() {
+  return {
+    parentTag: null,
+    mode: { includeIndices: true, includeAttributes: true },
+    preferredAttributes: [],
+    ignoreTags: new Set(),
+    disableLeafIndex: false,
+    skipSingleIndex: false,
+    useXlinkLabelIndex: false,
+    useParentScopedIndices: false,
+    ignoreParentSegment: false,
+    predicateTemplate: "[@{attr1}='{attr1V}']",
+    xlinkLabelPattern: { type: "any", pattern: "" },
+    forceIndexOneFor: new Set(),
+    exceptionsToIndexOneForcing: new Set(),
+    useAttributeBasedIndexing: false, // ADD THIS
+    attributeBasedIndexingAttribute: "" // ADD THIS
+  };
+}
 
   buildXPathRegex(document, position) {
     const xml = document.getText();
@@ -239,65 +241,133 @@ $$\\]>         # Closing ]]> (Corrected)
     return { customIndex, customIndexRaw: raw };
   }
 
-  buildElementStack(events, offset, config) {
-    const currentStack = [];
-    let targetStack = [];
-    const counters = config.useParentScopedIndices ? {} : [];
+buildElementStack(events, offset, config) {
+  const currentStack = [];
+  let targetStack = [];
+  const counters = config.useParentScopedIndices ? {} : [];
+  const attributeCounters = {}; // For attribute-based indexing
 
-    for (const event of events) {
-      if (event.pos > offset && !targetStack.length) {
-        // The moment we pass the cursor, the previous stack was the correct one.
-        targetStack = [...currentStack];
-      }
-
-      if (event.type === "open") {
-        let idx;
-        if (config.useParentScopedIndices) {
-          const parentPath = currentStack
-            .map((e) => `${e.tag}[${e.idx}]`)
-            .join("/");
-          if (!counters[parentPath]) counters[parentPath] = {};
-          counters[parentPath][event.tag] =
-            (counters[parentPath][event.tag] || 0) + 1;
-          idx = counters[parentPath][event.tag];
-        } else {
-          const depth = currentStack.length;
-          if (!counters[depth]) counters[depth] = {};
-          counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-          idx = counters[depth][event.tag];
-        }
-        const { attrName, attrValue } = this.selectPreferredAttribute(
-          event.attrs,
-          config.preferredAttributes
-        );
-        currentStack.push({
-          tag: event.tag,
-          idx,
-          customIndex: event.customIndex,
-          customIndexRaw: event.customIndexRaw,
-          attrName,
-          attrValue,
-          attrs: event.attrs,
-        });
-      } else if (event.type === "close") {
-        if (
-          currentStack.length > 0 &&
-          currentStack[currentStack.length - 1].tag === event.tag
-        ) {
-          // If the cursor is right on the closing tag, the stack *before* popping is the correct one.
-          if (event.pos >= offset && !targetStack.length) {
-            targetStack = [...currentStack];
-          }
-          currentStack.pop();
-        }
-      }
-    }
-    // If the loop finished and we never set a target (e.g., cursor at end of file), use the final stack.
-    if (!targetStack.length && currentStack.length > 0) {
+  for (const event of events) {
+    if (event.pos > offset && !targetStack.length) {
       targetStack = [...currentStack];
     }
-    return { stack: targetStack };
+
+    if (event.type === "open") {
+      let idx;
+      
+      // Determine which attribute to use for indexing
+      let indexingAttribute = null;
+      let indexingValue = null;
+      
+      if (config.useAttributeBasedIndexing) {
+        // Use first preferred attribute for indexing
+        if (config.preferredAttributes && config.preferredAttributes.length > 0) {
+          for (const attr of config.preferredAttributes) {
+            if (event.attrs && event.attrs[attr]) {
+              indexingAttribute = attr;
+              indexingValue = event.attrs[attr];
+              break;
+            }
+          }
+        }
+      }
+      
+      // Calculate index based on mode
+      if (config.useAttributeBasedIndexing && indexingAttribute && indexingValue) {
+        // Attribute-based indexing
+        const depth = currentStack.length;
+        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
+        
+        if (!attributeCounters[key]) {
+          attributeCounters[key] = 0;
+        }
+        attributeCounters[key]++;
+        idx = attributeCounters[key];
+      } else if (config.useParentScopedIndices) {
+        // Parent-scoped indexing (existing code)
+        const parentPath = currentStack
+          .map((e) => `${e.tag}[${e.idx}]`)
+          .join("/");
+        if (!counters[parentPath]) counters[parentPath] = {};
+        counters[parentPath][event.tag] =
+          (counters[parentPath][event.tag] || 0) + 1;
+        idx = counters[parentPath][event.tag];
+      } else {
+        // Depth-based indexing (existing code)
+        const depth = currentStack.length;
+        if (!counters[depth]) counters[depth] = {};
+        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+        idx = counters[depth][event.tag];
+      }
+      
+      // Collect ALL preferred attributes for this element
+      const preferredAttrs = [];
+      if (event.attrs && config.preferredAttributes) {
+        for (const attrName of config.preferredAttributes) {
+          if (event.attrs[attrName]) {
+            preferredAttrs.push({
+              name: attrName,
+              value: event.attrs[attrName]
+            });
+          }
+        }
+      }
+      
+      currentStack.push({
+        tag: event.tag,
+        idx,
+        customIndex: event.customIndex,
+        customIndexRaw: event.customIndexRaw,
+        attrs: event.attrs,
+        // Store the attribute used for indexing
+        indexingAttribute: indexingAttribute,
+        indexingValue: indexingValue,
+        // Store ALL preferred attributes
+        preferredAttrs: preferredAttrs
+      });
+    } else if (event.type === "close") {
+      if (
+        currentStack.length > 0 &&
+        currentStack[currentStack.length - 1].tag === event.tag
+      ) {
+        if (event.pos >= offset && !targetStack.length) {
+          targetStack = [...currentStack];
+        }
+        currentStack.pop();
+      }
+    }
   }
+  
+  if (!targetStack.length && currentStack.length > 0) {
+    targetStack = [...currentStack];
+  }
+  return { stack: targetStack };
+}
+
+generateXPathSegment(node, index, pathLength, config) {
+  const isLeaf = index === pathLength - 1;
+  let segment = node.tag;
+  
+  // For attribute-based indexing, include ALL preferred attributes
+  if (config.useAttributeBasedIndexing && node.preferredAttrs && node.preferredAttrs.length > 0) {
+    // Add all preferred attributes as predicates
+    for (const attr of node.preferredAttrs) {
+      const escapedValue = this.escapeAttributeValue(attr.value);
+      segment += `[@${attr.name}='${escapedValue}']`;
+    }
+  } else {
+    // Normal mode - use the selectPreferredAttribute logic
+    if (node.preferredAttrs && node.preferredAttrs.length > 0) {
+      // Use first preferred attribute only
+      const attr = node.preferredAttrs[0];
+      const escapedValue = this.escapeAttributeValue(attr.value);
+      segment += `[@${attr.name}='${escapedValue}']`;
+    }
+  }
+  
+  segment += this.generateIndex(node, isLeaf, config);
+  return segment;
+}
 
   selectPreferredAttribute(attrs, preferredList = []) {
     for (const preferred of preferredList) {
@@ -327,12 +397,9 @@ $$\\]>         # Closing ]]> (Corrected)
     return "/" + segments.join("/");
   }
 
-  generateXPathSegment(node, index, pathLength, config) {
-    const isLeaf = index === pathLength - 1;
-    let segment = node.tag;
-    segment += this.generateAttributePredicate(node, config);
-    segment += this.generateIndex(node, isLeaf, config);
-    return segment;
+
+  escapeAttributeValue(value) {
+    return String(value).replace(/'/g, "&apos;");
   }
 
   generateAttributePredicate(node, config) {
@@ -340,11 +407,15 @@ $$\\]>         # Closing ]]> (Corrected)
       return "";
 
     // Use template if provided
+
     if (config.predicateTemplate) {
       const escapedValue = this.escapeAttributeValue(node.attrValue);
 
       // Replace template tokens
       let predicate = config.predicateTemplate;
+
+      // Store reference to 'this' for use in callbacks
+      const self = this;
 
       // Basic tokens
       predicate = predicate.replace(/{at}/g, "@");
@@ -358,14 +429,14 @@ $$\\]>         # Closing ]]> (Corrected)
         // Replace {attr:name} with specific attribute values
         predicate = predicate.replace(/{attr:(\w+)}/g, (match, attrName) => {
           return node.attrs[attrName]
-            ? this.escapeAttributeValue(node.attrs[attrName])
+            ? self.escapeAttributeValue(node.attrs[attrName])
             : "";
         });
 
         // {attrs} - all attributes as conditions
         if (predicate.includes("{attrs}")) {
           const allAttrs = Object.entries(node.attrs)
-            .map(([k, v]) => `@${k}='${this.escapeAttributeValue(v)}'`)
+            .map(([k, v]) => `@${k}='${self.escapeAttributeValue(v)}'`)
             .join(" and ");
           predicate = predicate.replace(/{attrs}/g, allAttrs);
         }
@@ -431,61 +502,81 @@ $$\\]>         # Closing ]]> (Corrected)
     return `[@${node.attrName}='${escapedValue}']`;
   }
 
-generateIndex(node, isLeaf, config) {
-  if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex))
-    return "";
-  
-  const index =
-    config.useXlinkLabelIndex && node.customIndex != null
-      ? node.customIndex
-      : node.idx;
-  
-  // FIRST: Check exceptions - these ALWAYS override everything else
-  // If tag is in exceptions AND index is 1, never show [1]
-  if (index === 1 && 
-      config.exceptionsToIndexOneForcing && 
-      config.exceptionsToIndexOneForcing.has(node.tag)) {
-    return "";
-  }
-  
-  // For index [1] handling
-  if (index === 1) {
-    // If skipSingleIndex is ON (true), hide [1] by default
-    if (config.skipSingleIndex) {
-      // But check if this tag is forced to show [1]
-      if (config.forceIndexOneFor && config.forceIndexOneFor.has(node.tag)) {
-        return "[1]";
-      }
-      // Also check ignoreTags
-      if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
-        return "";
-      }
-      return ""; // Skip [1] by default when skipSingleIndex is ON
-    } else {
-      // skipSingleIndex is OFF (false)
-      
-      // If forceIndexOneFor is empty, show [1] for all (except exceptions already handled)
-      if (!config.forceIndexOneFor || config.forceIndexOneFor.size === 0) {
-        return "[1]";
-      }
-      
-      // If forceIndexOneFor has specific tags, only show [1] for those
-      if (config.forceIndexOneFor.has(node.tag)) {
-        return "[1]";
-      }
-      
-      // Check ignoreTags
-      if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
-        return "";
-      }
-      
-      return ""; // Don't show [1] for non-forced tags when forceIndexOneFor is not empty
+  generateIndex(node, isLeaf, config) {
+    if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex))
+      return "";
+
+    const index =
+      config.useXlinkLabelIndex && node.customIndex != null
+        ? node.customIndex
+        : node.idx;
+
+    // Debug logging
+    if (index === 1) {
+      console.log(`Processing ${node.tag}[1]:`);
+      console.log(`  - skipSingleIndex: ${config.skipSingleIndex}`);
+      console.log(
+        `  - forceIndexOneFor size: ${config.forceIndexOneFor?.size || 0}`
+      );
+      console.log(
+        `  - exceptionsToIndexOneForcing has ${
+          node.tag
+        }: ${config.exceptionsToIndexOneForcing?.has(node.tag)}`
+      );
     }
+
+    // FIRST: Check exceptions - these ALWAYS override everything else
+    // If tag is in exceptions AND index is 1, never show [1]
+    if (
+      index === 1 &&
+      config.exceptionsToIndexOneForcing &&
+      config.exceptionsToIndexOneForcing.has(node.tag)
+    ) {
+      console.log(`  -> Hiding [1] for ${node.tag} (in exceptions)`);
+      return "";
+    }
+
+    // For index [1] handling
+    if (index === 1) {
+      // If skipSingleIndex is ON (true), hide [1] by default
+      if (config.skipSingleIndex) {
+        // But check if this tag is forced to show [1]
+        if (config.forceIndexOneFor && config.forceIndexOneFor.has(node.tag)) {
+          return "[1]";
+        }
+        // Also check ignoreTags
+        if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
+          return "";
+        }
+        return ""; // Skip [1] by default when skipSingleIndex is ON
+      } else {
+        // skipSingleIndex is OFF (false)
+
+        // If forceIndexOneFor is empty, show [1] for all (except exceptions already handled)
+        if (!config.forceIndexOneFor || config.forceIndexOneFor.size === 0) {
+          console.log(
+            `  -> Showing [1] for ${node.tag} (skipSingleIndex OFF, no force list)`
+          );
+          return "[1]";
+        }
+
+        // If forceIndexOneFor has specific tags, only show [1] for those
+        if (config.forceIndexOneFor.has(node.tag)) {
+          return "[1]";
+        }
+
+        // Check ignoreTags
+        if (config.ignoreTags && config.ignoreTags.has(node.tag)) {
+          return "";
+        }
+
+        return ""; // Don't show [1] for non-forced tags when forceIndexOneFor is not empty
+      }
+    }
+
+    // For all other indices (not 1), always show
+    return `[${index}]`;
   }
-  
-  // For all other indices (not 1), always show
-  return `[${index}]`;
-}
 }
 
 module.exports = XPathBuilder;
