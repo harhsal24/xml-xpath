@@ -42,9 +42,15 @@ xpathBuilder.loadConfiguration = function () {
       "attributeBasedIndexingAttribute",
       ""
     ),
-    useRelativePath: cfg.get("useRelativePath", false),
+   useRelativePath: cfg.get("useRelativePath", false),
     includeNamespaces: cfg.get("includeNamespaces", false),
-    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false), 
+    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false),
+    useSmartRelativePath: cfg.get("useSmartRelativePath", false),
+    smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", "d"),
+    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", ["ValuationUseType", "id", "type", "name"]),
+    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", ["ImageCategoryType", "id", "name", "type", "category", "status"]),
+    // In the loadConfiguration override method, add:
+smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", false),
   };
 };
 
@@ -143,12 +149,83 @@ function registerCommands(context) {
        "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
     "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
     "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
+    "xmlXpath.toggleUseSmartRelativePath": toggleUseSmartRelativePath,
+"xmlXpath.setSmartRelativeNamespacePrefix": setSmartRelativeNamespacePrefix,
+ "xmlXpath.setSmartRelativeSignificantAttributes": setSmartRelativeSignificantAttributes,
+ "xmlXpath.toggleSmartRelativeIgnoreLastElement": toggleSmartRelativeIgnoreLastElement,
   };
 
   for (const [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(name, handler));
   }
 }
+
+// Add the toggle function:
+async function toggleSmartRelativeIgnoreLastElement() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeIgnoreLastElement", false);
+  await cfg.update("smartRelativeIgnoreLastElement", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Smart Relative Ignore Last Element: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
+// NEW: Toggle smart relative path
+async function toggleUseSmartRelativePath() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("useSmartRelativePath", false);
+  await cfg.update("useSmartRelativePath", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Smart Relative Path: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
+// NEW: Set smart relative namespace prefix
+async function setSmartRelativeNamespacePrefix() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeNamespacePrefix", "d");
+  
+  const value = await vscode.window.showInputBox({
+    prompt: "Namespace prefix for smart relative XPath",
+    value: current,
+    placeHolder: "e.g., d, ns, app",
+    validateInput: (value) => {
+      if (!value) return "Prefix cannot be empty";
+      if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(value)) {
+        return "Prefix must be a valid XML namespace prefix";
+      }
+      return null;
+    }
+  });
+
+  if (value) {
+    await cfg.update("smartRelativeNamespacePrefix", value, vscode.ConfigurationTarget.Global);
+    update();
+    vscode.window.showInformationMessage(`Smart relative prefix set to: ${value}`);
+  }
+}
+
+// ADD this missing function:
+async function setSmartRelativeSignificantAttributes() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeSignificantAttributes", ["ValuationUseType", "id", "type", "name"]);
+  
+  const value = await vscode.window.showInputBox({
+    prompt: "Significant attributes for smart relative XPath (comma-separated)",
+    value: current.join(", "),
+    placeHolder: "ValuationUseType, id, type, name"
+  });
+
+  if (value !== undefined) {
+    const attributes = value.split(",").map(s => s.trim()).filter(Boolean);
+    await cfg.update("smartRelativeSignificantAttributes", attributes, vscode.ConfigurationTarget.Global);
+    update();
+    vscode.window.showInformationMessage(`Significant attributes set to: ${attributes.join(", ")}`);
+  }
+}
+
 
 // NEW: Toggle relative path
 async function toggleUseRelativePath() {
@@ -455,7 +532,7 @@ async function copyUniversalXPath() {
         // FIXED: Preserve attribute-based indexing settings
         useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
         attributeBasedIndexingAttribute:
-          currentConfig.attributeBasedIndexingAttribute,
+        currentConfig.attributeBasedIndexingAttribute,
           
       };
     };

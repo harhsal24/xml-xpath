@@ -38,7 +38,11 @@ class XPathBuilder {
       attributeBasedIndexingAttribute: "",
       useRelativePath: false,
       includeNamespaces: false,
-      includeDefaultNamespaces: false,
+      includeDefaultNamespaces: false,    
+     useSmartRelativePath: false,
+    smartRelativeNamespacePrefix: "d",
+    smartRelativeSignificantAttributes: ["ValuationUseType", "id", "type", "name"],
+    smartRelativeIdentifyingChildren: ["ImageCategoryType", "id", "name", "type", "category", "status"], 
     };
   }
 
@@ -59,13 +63,27 @@ class XPathBuilder {
     return this.generateXPath(path, config);
   }
 
-  tokenizeXML(xml, config) {
-    const cleanedXml = this.preprocessForTokenization(xml);
-    const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>/g;
-    const events = [];
-    let match;
-    try {
-      while ((match = tokenRegex.exec(cleanedXml))) {
+ // MODIFIED: Enhanced tokenizeXML to capture text content
+tokenizeXML(xml, config) {
+  const cleanedXml = this.preprocessForTokenization(xml);
+  const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>|([^<]+)/g;
+  const events = [];
+  let match;
+  
+  try {
+    while ((match = tokenRegex.exec(cleanedXml))) {
+      if (match[5]) {
+        // Text content
+        const textContent = match[5].trim();
+        if (textContent) {
+          events.push({
+            type: "text",
+            text: textContent,
+            pos: match.index
+          });
+        }
+      } else {
+        // XML tag
         const event = this.parseXMLToken(match, config);
         if (event) {
           events.push(event);
@@ -74,12 +92,13 @@ class XPathBuilder {
           }
         }
       }
-      return events;
-    } catch (error) {
-      console.error("XML tokenization error:", error);
-      return null;
     }
+    return events;
+  } catch (error) {
+    console.error("XML tokenization error:", error);
+    return null;
   }
+}
 
   preprocessForTokenization(xml) {
     let processed = xml;
@@ -253,122 +272,175 @@ $$\\]>         # Closing ]]> (Corrected)
     return { customIndex, customIndexRaw: raw };
   }
 
-  buildElementStack(events, offset, config) {
-    const currentStack = [];
-    let targetStack = [];
-    const counters = config.useParentScopedIndices ? {} : [];
-    const attributeCounters = {};
+// MODIFIED: Enhanced buildElementStack to capture child elements
+buildElementStack(events, offset, config) {
+  const currentStack = [];
+  let targetStack = [];
+  const counters = config.useParentScopedIndices ? {} : [];
+  const attributeCounters = {};
+  
+  const namespaceMap = (config.includeNamespaces || config.includeDefaultNamespaces) ? 
+    this.buildNamespaceMap(events) : {};
 
-    // NEW: Build namespace map if namespaces are enabled
-    const namespaceMap =
-      config.includeNamespaces || config.includeDefaultNamespaces
-        ? this.buildNamespaceMap(events)
-        : {};
-
-    for (const event of events) {
-      if (event.pos > offset && !targetStack.length) {
-        targetStack = [...currentStack];
-      }
-
-      if (event.type === "open") {
-        let idx;
-
-        // Determine which attribute to use for indexing
-        let indexingAttribute = null;
-        let indexingValue = null;
-
-        if (config.useAttributeBasedIndexing) {
-          if (
-            config.preferredAttributes &&
-            config.preferredAttributes.length > 0
-          ) {
-            for (const attr of config.preferredAttributes) {
-              if (event.attrs && event.attrs[attr]) {
-                indexingAttribute = attr;
-                indexingValue = event.attrs[attr];
-                break;
-              }
-            }
-          }
-        }
-
-        // Calculate index based on mode
-        if (
-          config.useAttributeBasedIndexing &&
-          indexingAttribute &&
-          indexingValue
-        ) {
-          const depth = currentStack.length;
-          const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
-
-          if (!attributeCounters[key]) {
-            attributeCounters[key] = 0;
-          }
-          attributeCounters[key]++;
-          idx = attributeCounters[key];
-        } else if (config.useParentScopedIndices) {
-          const parentPath = currentStack
-            .map((e) => `${e.tag}[${e.idx}]`)
-            .join("/");
-          if (!counters[parentPath]) counters[parentPath] = {};
-          counters[parentPath][event.tag] =
-            (counters[parentPath][event.tag] || 0) + 1;
-          idx = counters[parentPath][event.tag];
-        } else {
-          const depth = currentStack.length;
-          if (!counters[depth]) counters[depth] = {};
-          counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-          idx = counters[depth][event.tag];
-        }
-
-        // Collect ALL preferred attributes for this element
-        const preferredAttrs = [];
-        if (event.attrs && config.preferredAttributes) {
-          for (const attrName of config.preferredAttributes) {
-            if (event.attrs[attrName]) {
-              preferredAttrs.push({
-                name: attrName,
-                value: event.attrs[attrName],
-              });
-            }
-          }
-        }
-
-        // NEW: Get namespace context for this element
-        const namespaceContext =
-          namespaceMap[`${event.pos}-${event.tag}`] || {};
-
-        currentStack.push({
-          tag: event.tag,
-          idx,
-          customIndex: event.customIndex,
-          customIndexRaw: event.customIndexRaw,
-          attrs: event.attrs,
-          indexingAttribute: indexingAttribute,
-          indexingValue: indexingValue,
-          preferredAttrs: preferredAttrs,
-          // NEW: Store namespace context
-          namespaceContext: namespaceContext,
-        });
-      } else if (event.type === "close") {
-        if (
-          currentStack.length > 0 &&
-          currentStack[currentStack.length - 1].tag === event.tag
-        ) {
-          if (event.pos >= offset && !targetStack.length) {
-            targetStack = [...currentStack];
-          }
-          currentStack.pop();
-        }
-      }
-    }
-
-    if (!targetStack.length && currentStack.length > 0) {
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    
+    if (event.pos > offset && !targetStack.length) {
       targetStack = [...currentStack];
     }
-    return { stack: targetStack };
-  }
 
+    if (event.type === "open") {
+      let idx;
+      
+      // Existing indexing logic...
+      let indexingAttribute = null;
+      let indexingValue = null;
+      
+      if (config.useAttributeBasedIndexing) {
+        if (config.preferredAttributes && config.preferredAttributes.length > 0) {
+          for (const attr of config.preferredAttributes) {
+            if (event.attrs && event.attrs[attr]) {
+              indexingAttribute = attr;
+              indexingValue = event.attrs[attr];
+              break;
+            }
+          }
+        }
+      }
+      
+      if (config.useAttributeBasedIndexing && indexingAttribute && indexingValue) {
+        const depth = currentStack.length;
+        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
+        if (!attributeCounters[key]) attributeCounters[key] = 0;
+        attributeCounters[key]++;
+        idx = attributeCounters[key];
+      } else if (config.useParentScopedIndices) {
+        const parentPath = currentStack.map((e) => `${e.tag}[${e.idx}]`).join("/");
+        if (!counters[parentPath]) counters[parentPath] = {};
+        counters[parentPath][event.tag] = (counters[parentPath][event.tag] || 0) + 1;
+        idx = counters[parentPath][event.tag];
+      } else {
+        const depth = currentStack.length;
+        if (!counters[depth]) counters[depth] = {};
+        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+        idx = counters[depth][event.tag];
+      }
+      
+      const preferredAttrs = [];
+      if (event.attrs && config.preferredAttributes) {
+        for (const attrName of config.preferredAttributes) {
+          if (event.attrs[attrName]) {
+            preferredAttrs.push({ name: attrName, value: event.attrs[attrName] });
+          }
+        }
+      }
+      
+      const namespaceContext = namespaceMap[`${event.pos}-${event.tag}`] || {};
+      
+      currentStack.push({
+        tag: event.tag,
+        idx,
+        customIndex: event.customIndex,
+        customIndexRaw: event.customIndexRaw,
+        attrs: event.attrs,
+        indexingAttribute: indexingAttribute,
+        indexingValue: indexingValue,
+        preferredAttrs: preferredAttrs,
+        namespaceContext: namespaceContext,
+        // NEW: Track for child element identification
+        eventIndex: i,
+        identifyingChildren: []
+      });
+      
+    } else if (event.type === "close") {
+      if (currentStack.length > 0 && currentStack[currentStack.length - 1].tag === event.tag) {
+        if (event.pos >= offset && !targetStack.length) {
+          targetStack = [...currentStack];
+        }
+        currentStack.pop();
+      }
+    }
+  }
+  
+  // NEW: Populate identifying children for each element
+  if (config.useSmartRelativePath) {
+    targetStack = this.populateIdentifyingChildren(events, targetStack, config);
+  }
+  
+  if (!targetStack.length && currentStack.length > 0) {
+    targetStack = [...currentStack];
+  }
+  return { stack: targetStack };
+}
+
+// NEW: Populate identifying children for smart relative path
+populateIdentifyingChildren(events, stack, config) {
+  const identifyingChildElements = config.smartRelativeIdentifyingChildren || 
+    ['ImageCategoryType', 'id', 'name', 'type', 'category', 'status'];
+  
+  for (let stackItem of stack) {
+    stackItem.identifyingChildren = this.findIdentifyingChildren(
+      events, 
+      stackItem.eventIndex, 
+      stackItem.tag, 
+      identifyingChildElements
+    );
+  }
+  
+  return stack;
+}
+
+// NEW: Find identifying child elements and their text content
+findIdentifyingChildren(events, parentEventIndex, parentTag, identifyingTags) {
+  const identifyingChildren = [];
+  let depth = 0;
+  let currentChildTag = null;
+  let textContent = '';
+  
+  // Start from the parent element
+  for (let i = parentEventIndex + 1; i < events.length; i++) {
+    const event = events[i];
+    
+    if (event.type === 'open') {
+      if (depth === 0) {
+        // Direct child of parent
+        currentChildTag = event.tag;
+        textContent = '';
+        
+        // Check if this is an identifying child
+        if (identifyingTags.includes(event.tag)) {
+          // We found an identifying child, now collect its text
+        }
+      }
+      depth++;
+      
+    } else if (event.type === 'close') {
+      depth--;
+      
+      if (depth === 0 && currentChildTag && identifyingTags.includes(currentChildTag)) {
+        // End of identifying child element
+        identifyingChildren.push({
+          name: currentChildTag,
+          value: textContent.trim()
+        });
+        currentChildTag = null;
+        textContent = '';
+      }
+      
+      if (depth < 0) {
+        // We've exited the parent element
+        break;
+      }
+      
+    } else if (event.type === 'text' && depth === 1 && 
+               currentChildTag && identifyingTags.includes(currentChildTag)) {
+      // Text content of identifying child
+      textContent += event.text || '';
+    }
+  }
+  
+  return identifyingChildren;
+}
   generateXPathSegment(node, index, pathLength, config) {
     const isLeaf = index === pathLength - 1;
 
@@ -729,6 +801,192 @@ $$\\]>         # Closing ]]> (Corrected)
     // Use // for relative path
     return "//" + segments.join("/");
   }
+
+  // NEW: Find the most significant ancestor element
+findSignificantAncestor(stack, config) {
+  if (!config.smartRelativeSignificantAttributes || config.smartRelativeSignificantAttributes.length === 0) {
+    return -1; // No significant attributes defined
+  }
+  
+  // Look for elements with significant attributes, starting from the end (closest to target)
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const element = stack[i];
+    
+    if (element.attrs) {
+      // Check if this element has any significant attributes
+      for (const sigAttr of config.smartRelativeSignificantAttributes) {
+        if (element.attrs[sigAttr]) {
+          return i; // Return index of significant ancestor
+        }
+      }
+    }
+  }
+  
+  return -1; // No significant ancestor found
+}
+
+// MODIFIED: Enhanced smart relative XPath generation
+generateSmartRelativeXPath(path, config) {
+  if (!path || path.length === 0) return "";
+  
+  const prefix = config.smartRelativeNamespacePrefix || "d";
+  const landmarks = [];
+  
+  // Determine the effective path (exclude last element if configured)
+  let effectivePath = path;
+  if (config.smartRelativeIgnoreLastElement && path.length > 1) {
+    effectivePath = path.slice(0, -1);
+  }
+  
+  // 1. Always include root element
+  if (effectivePath.length > 0) {
+    landmarks.push({
+      element: effectivePath[0],
+      isRoot: true,
+      isTarget: false
+    });
+  }
+  
+  // 2. Find landmark elements (excluding the new last element)
+  for (let i = 1; i < effectivePath.length - 1; i++) {
+    const element = effectivePath[i];
+    
+    if (this.hasSignificantAttributes(element, config) || 
+        this.hasIdentifyingChildren(element, config)) {
+      landmarks.push({
+        element: element,
+        isRoot: false,
+        isTarget: false
+      });
+    }
+  }
+  
+  // 3. Add the new target element (which might be the original target's parent)
+  if (effectivePath.length > 1) {
+    const targetElement = effectivePath[effectivePath.length - 1];
+    landmarks.push({
+      element: targetElement,
+      isRoot: false,
+      isTarget: true
+    });
+  }
+  
+  // 4. Generate formatted XPath
+  let result = "";
+  const indent = "    "; // 4 spaces
+  
+  for (let i = 0; i < landmarks.length; i++) {
+    const landmark = landmarks[i];
+    const element = landmark.element;
+    
+    let segment = `${prefix}:${element.tag}`;
+    
+    // Add identifiers for non-root elements
+    if (!landmark.isRoot) {
+      const identifier = this.getElementIdentifier(element, config, prefix);
+      if (identifier) {
+        segment += identifier;
+      } else if (landmark.isTarget) {
+        // Add index for target if no identifier found
+        segment += this.generateIndex(element, true, config);
+      }
+    }
+    
+    // Format with proper indentation
+    if (landmark.isRoot) {
+      result += `/${segment}`;
+    } else {
+      result += `\n${indent}//${segment}`;
+    }
+  }
+  
+  return result;
+}
+// NEW: Enhanced generateXPath to support smart relative
+generateXPath(path, config) {
+  if (!path || path.length === 0) return "";
+  
+  // NEW: Check for smart relative path first
+  if (config.useSmartRelativePath) {
+    return this.generateSmartRelativeXPath(path, config);
+  }
+  
+  // Existing logic for regular relative path
+  if (config.useRelativePath) {
+    return this.generateRelativeXPath(path, config);
+  }
+  
+  // Original absolute path logic
+  const segments = path.map((node, index) =>
+    this.generateXPathSegment(node, index, path.length, config)
+  );
+  return "/" + segments.join("/");
+}
+
+
+
+// NEW: Get the best identifier for an element (attribute or child element)
+// REPLACE the current getElementIdentifier method with this:
+getElementIdentifier(element, config, prefix) {
+  // First try actual attributes
+  const sigAttr = this.findSignificantAttribute(element, config);
+  if (sigAttr) {
+    const escapedValue = this.escapeAttributeValue(sigAttr.value);
+    return `[@${sigAttr.name}='${escapedValue}']`;
+  }
+  
+  // Then try identifying children (as pseudo-attributes)
+  if (element.identifyingChildren && element.identifyingChildren.length > 0) {
+    const child = element.identifyingChildren[0];
+    const escapedValue = this.escapeAttributeValue(child.value);
+    return `[@${prefix}:${child.name}='${escapedValue}']`;
+  }
+  
+  return null;
+}
+// NEW: Check if element has identifying children
+hasIdentifyingChildren(element, config) {
+  return element.identifyingChildren && element.identifyingChildren.length > 0;
+}
+
+
+// NEW: Check if element has significant attributes
+hasSignificantAttributes(element, config) {
+  if (!element.attrs || !config.smartRelativeSignificantAttributes) {
+    return false;
+  }
+  
+  for (const sigAttr of config.smartRelativeSignificantAttributes) {
+    if (element.attrs[sigAttr]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// NEW: Find the most significant attribute for display
+findSignificantAttribute(element, config) {
+  if (!element.attrs || !config.smartRelativeSignificantAttributes) {
+    return null;
+  }
+  
+  // Return first significant attribute found
+  for (const sigAttr of config.smartRelativeSignificantAttributes) {
+    if (element.attrs[sigAttr]) {
+      return {
+        name: sigAttr,
+        value: element.attrs[sigAttr]
+      };
+    }
+  }
+  
+  // If no significant attributes, return first preferred attribute
+  if (element.preferredAttrs && element.preferredAttrs.length > 0) {
+    return element.preferredAttrs[0];
+  }
+  
+  return null;
+}
 }
 
 module.exports = XPathBuilder;

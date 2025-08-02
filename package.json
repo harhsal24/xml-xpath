@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -136,7 +136,27 @@
         "command": "xmlXpath.toggleIncludeDefaultNamespaces",
         "title": "XML XPath: Toggle Include Default Namespaces",
         "category": "XML XPath"
-      }
+      },
+      {
+  "command": "xmlXpath.toggleUseSmartRelativePath",
+  "title": "XML XPath: Toggle Smart Relative Path",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.setSmartRelativeNamespacePrefix", 
+  "title": "XML XPath: Set Smart Relative Namespace Prefix",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.setSmartRelativeSignificantAttributes",
+  "title": "XML XPath: Set Smart Relative Significant Attributes", 
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.toggleSmartRelativeIgnoreLastElement",
+  "title": "XML XPath: Toggle Ignore Last Element in Smart Relative Path",
+  "category": "XML XPath"
+}
     ],
     "keybindings": [
       {
@@ -148,7 +168,17 @@
         "key": "ctrl+shift+f",
         "command": "xmlXpath.searchWithXPath",
         "when": "editorTextFocus && editorLangId == xml"
-      }
+      },
+        {
+    "key": "ctrl+shift+x",
+    "command": "xmlXpath.toggleUseSmartRelativePath",
+    "when": "editorLangId == xml"
+  },
+  {
+    "key": "alt+shift+x", 
+    "command": "xmlXpath.searchWithXPath",
+    "when": "editorLangId == xml"
+  }
     ],
     "menus": {
       "editor/context": [
@@ -293,9 +323,48 @@
           "type": "boolean",
           "default": false,
           "description": "Include default namespace handling in XPath"
-        }
+        },
+        "xmlXpath.useSmartRelativePath": {
+        "type": "boolean",
+        "default": false,
+        "description": "Generate smart relative XPath starting from elements with significant attributes"
+        },
+        "xmlXpath.smartRelativeNamespacePrefix": {
+          "type": "string", 
+          "default": "d",
+          "description": "Namespace prefix to use in smart relative XPath (e.g., 'd' for 'd:ELEMENT')"
+        },
+        "xmlXpath.smartRelativeSignificantAttributes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["ValuationUseType", "id", "type", "name"],
+          "description": "Attributes that make an element significant for smart relative XPath"
+        },
+           "xmlXpath.smartRelativeLandmarkMode": {
+            "type": "boolean",
+            "default": true,
+            "description": "Use landmark mode (show only root + significant elements + target)"
+          },
+          "xmlXpath.smartRelativeIndentSize": {
+            "type": "number",
+            "default": 4,
+            "description": "Number of spaces for indentation in smart relative XPath"
+          },
+        "xmlXpath.smartRelativeIdentifyingChildren": {
+          "type": "array", 
+          "items": { "type": "string" },
+          "default": ["ImageCategoryType", "id", "name", "type", "category", "status"],
+          "description": "Child elements that can identify their parent"
+        },
+        "xmlXpath.smartRelativeIgnoreLastElement": {
+    "type": "boolean",
+    "default": false,
+    "description": "When enabled, excludes the target element from smart relative XPath, showing only the path to its container"
+  }
       }
+ 
     }
+
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.3"
