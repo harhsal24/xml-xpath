@@ -41,8 +41,12 @@ class XPathBuilder {
       includeDefaultNamespaces: false,    
      useSmartRelativePath: false,
     smartRelativeNamespacePrefix: "d",
-    smartRelativeSignificantAttributes: ["ValuationUseType", "id", "type", "name"],
-    smartRelativeIdentifyingChildren: ["ImageCategoryType", "id", "name", "type", "category", "status"], 
+    smartRelativeSignificantAttributes: [],
+    smartRelativeIdentifyingChildren: [], 
+    smartRelativeSingleLine: false,
+ smartRelativeVirtualRoot: "",
+    smartRelativeVirtualRootMode: "include",
+    smartRelativeIgnoreLastElement: false
     };
   }
 
@@ -790,17 +794,17 @@ findIdentifyingChildren(events, parentEventIndex, parentTag, identifyingTags) {
     return tagName;
   }
 
-  // Generate relative XPath using // syntax
-  generateRelativeXPath(path, config) {
-    if (!path || path.length === 0) return "";
+ // Generate relative XPath using // syntax
+generateRelativeXPath(path, config) {
+  if (!path || path.length === 0) return "";
 
-    const segments = path.map((node, index) =>
-      this.generateXPathSegment(node, index, path.length, config)
-    );
+  const segments = path.map((node, index) =>
+    this.generateXPathSegment(node, index, path.length, config)
+  );
 
-    // Use // for relative path
-    return "//" + segments.join("/");
-  }
+  // Use // for relative path
+  return "//" + segments.join("/");
+}
 
   // NEW: Find the most significant ancestor element
 findSignificantAncestor(stack, config) {
@@ -825,7 +829,32 @@ findSignificantAncestor(stack, config) {
   return -1; // No significant ancestor found
 }
 
-// MODIFIED: Enhanced smart relative XPath generation
+
+
+// FIXED: Enhanced generateXPath with proper absolute/relative path logic
+generateXPath(path, config) {
+  if (!path || path.length === 0) return "";
+  
+  // 1. Check for smart relative path first
+  if (config.useSmartRelativePath) {
+    return this.generateSmartRelativeXPath(path, config);
+  }
+  
+  // 2. Check for regular relative path
+  if (config.useRelativePath) {
+    return this.generateRelativeXPath(path, config);
+  }
+  
+  // 3. DEFAULT: Generate absolute path (starts with /)
+  const segments = path.map((node, index) =>
+    this.generateXPathSegment(node, index, path.length, config)
+  );
+  
+  return "/" + segments.join("/");  // Absolute path with single /
+}
+
+// COMPLETELY FIXED: Enhanced smart relative XPath generation with proper virtual root support
+// COMPLETELY FIXED: Enhanced smart relative XPath generation with proper virtual root support
 generateSmartRelativeXPath(path, config) {
   if (!path || path.length === 0) return "";
   
@@ -838,17 +867,77 @@ generateSmartRelativeXPath(path, config) {
     effectivePath = path.slice(0, -1);
   }
   
-  // 1. Always include root element
-  if (effectivePath.length > 0) {
-    landmarks.push({
-      element: effectivePath[0],
-      isRoot: true,
-      isTarget: false
-    });
+
+  
+  let startIndex = 0;
+  let hasVirtualRoot = false;
+  
+  // Handle virtual root
+  if (config.smartRelativeVirtualRoot) {
+    // Find the virtual root in the path
+    let virtualRootIndex = -1;
+    for (let i = 0; i < effectivePath.length; i++) {
+      if (effectivePath[i].tag === config.smartRelativeVirtualRoot) {
+        virtualRootIndex = i;
+        break;
+      }
+    }
+    
+    console.log("Virtual root index:", virtualRootIndex);
+    
+    if (virtualRootIndex >= 0) {
+      hasVirtualRoot = true;
+      
+      if (config.smartRelativeVirtualRootMode === "include") {
+        // Include virtual root as starting point - ONLY process from virtual root onwards
+        startIndex = virtualRootIndex;
+        
+        // Add virtual root as first landmark
+        landmarks.push({
+          element: effectivePath[virtualRootIndex],
+          isRoot: true,
+          isVirtualRoot: true,
+          isTarget: false
+        });
+        
+        // Continue from next element
+        startIndex = virtualRootIndex + 1;
+      } else {
+        // Exclude virtual root, start from its children
+        startIndex = virtualRootIndex + 1;
+      }
+    } else {
+      // Virtual root not found in path
+      console.warn(`Virtual root '${config.smartRelativeVirtualRoot}' not found in element path`);
+      // Fallback to no virtual root behavior
+      hasVirtualRoot = false;
+      if (effectivePath.length > 0) {
+        landmarks.push({
+          element: effectivePath[0],
+          isRoot: true,
+          isVirtualRoot: false,
+          isTarget: false
+        });
+        startIndex = 1;
+      }
+    }
+  } else {
+    // No virtual root - use document root
+    if (effectivePath.length > 0) {
+      landmarks.push({
+        element: effectivePath[0],
+        isRoot: true,  
+        isVirtualRoot: false,
+        isTarget: false
+      });
+      startIndex = 1;
+    }
   }
   
-  // 2. Find landmark elements (excluding the new last element)
-  for (let i = 1; i < effectivePath.length - 1; i++) {
+
+  
+  // Find landmark elements (from startIndex onwards)
+  for (let i = startIndex; i < effectivePath.length - 1; i++) {
     const element = effectivePath[i];
     
     if (this.hasSignificantAttributes(element, config) || 
@@ -856,74 +945,108 @@ generateSmartRelativeXPath(path, config) {
       landmarks.push({
         element: element,
         isRoot: false,
+        isVirtualRoot: false,
         isTarget: false
       });
     }
   }
   
-  // 3. Add the new target element (which might be the original target's parent)
-  if (effectivePath.length > 1) {
+  // Add the target element (if we have elements from startIndex onwards)
+  if (effectivePath.length > startIndex) {
     const targetElement = effectivePath[effectivePath.length - 1];
     landmarks.push({
       element: targetElement,
       isRoot: false,
+      isVirtualRoot: false,
       isTarget: true
     });
+  } else if (effectivePath.length > 0 && startIndex === effectivePath.length) {
+    // Edge case: virtual root is the target element
+    if (landmarks.length > 0) {
+      landmarks[landmarks.length - 1].isTarget = true;
+    }
   }
   
-  // 4. Generate formatted XPath
+  
+  // Generate formatted XPath
+  if (config.smartRelativeSingleLine) {
+    return this.generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot);
+  } else {  
+    return this.generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot);
+  }
+}
+
+
+// FIXED: Generate single line smart XPath with proper virtual root handling
+generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
+  const segments = [];
+  
+  for (const landmark of landmarks) {
+    const element = landmark.element;
+    let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
+    
+    const identifier = this.getElementIdentifier(element, config, prefix);
+    if (identifier) {
+      segment += identifier;
+    } else if (landmark.isTarget) {
+      segment += this.generateIndex(element, true, config);
+    }
+    
+    segments.push(segment);
+  }
+  
+  // When using virtual root, ALWAYS start with //
+  if (hasVirtualRoot) {
+    return "//" + segments.join("//");
+  } else {
+    // Traditional format for document root
+    if (segments.length === 1) {
+      return "/" + segments[0];
+    } else {
+      return "/" + segments[0] + "//" + segments.slice(1).join("//");
+    }
+  }
+}
+
+// FIXED: Generate multi-line smart XPath with proper virtual root handling
+generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
   let result = "";
-  const indent = "    "; // 4 spaces
+  const indent = "    ";
   
   for (let i = 0; i < landmarks.length; i++) {
     const landmark = landmarks[i];
     const element = landmark.element;
     
-    let segment = `${prefix}:${element.tag}`;
+    let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
     
-    // Add identifiers for non-root elements
-    if (!landmark.isRoot) {
-      const identifier = this.getElementIdentifier(element, config, prefix);
-      if (identifier) {
-        segment += identifier;
-      } else if (landmark.isTarget) {
-        // Add index for target if no identifier found
-        segment += this.generateIndex(element, true, config);
-      }
+    const identifier = this.getElementIdentifier(element, config, prefix);
+    if (identifier) {
+      segment += identifier;
+    } else if (landmark.isTarget) {
+      segment += this.generateIndex(element, true, config);
     }
     
-    // Format with proper indentation
-    if (landmark.isRoot) {
-      result += `/${segment}`;
+    // When using virtual root, ALWAYS use // format
+    if (hasVirtualRoot) {
+      if (i === 0) {
+        result += `//${segment}`;
+      } else {
+        result += `\n${indent}//${segment}`;
+      }
     } else {
-      result += `\n${indent}//${segment}`;
+      // Traditional format for document root
+      if (landmark.isRoot && i === 0) {
+        result += `/${segment}`;
+      } else if (i === 0) {
+        result += `//${segment}`;
+      } else {
+        result += `\n${indent}//${segment}`;
+      }
     }
   }
   
   return result;
 }
-// NEW: Enhanced generateXPath to support smart relative
-generateXPath(path, config) {
-  if (!path || path.length === 0) return "";
-  
-  // NEW: Check for smart relative path first
-  if (config.useSmartRelativePath) {
-    return this.generateSmartRelativeXPath(path, config);
-  }
-  
-  // Existing logic for regular relative path
-  if (config.useRelativePath) {
-    return this.generateRelativeXPath(path, config);
-  }
-  
-  // Original absolute path logic
-  const segments = path.map((node, index) =>
-    this.generateXPathSegment(node, index, path.length, config)
-  );
-  return "/" + segments.join("/");
-}
-
-
 
 // NEW: Get the best identifier for an element (attribute or child element)
 // REPLACE the current getElementIdentifier method with this:

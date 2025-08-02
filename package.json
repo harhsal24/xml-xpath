@@ -156,6 +156,26 @@
   "command": "xmlXpath.toggleSmartRelativeIgnoreLastElement",
   "title": "XML XPath: Toggle Ignore Last Element in Smart Relative Path",
   "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.toggleSmartRelativeSingleLine",
+  "title": "XML XPath: Toggle Smart Relative Single Line",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.setSmartRelativeVirtualRoot",
+  "title": "XML XPath: Set Smart Relative Virtual Root",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.toggleSmartRelativeVirtualRootMode",
+  "title": "XML XPath: Toggle Virtual Root Mode (Include/Exclude)",
+  "category": "XML XPath"
+},
+{
+  "command": "xmlXpath.clearSmartRelativeVirtualRoot",
+  "title": "XML XPath: Clear Virtual Root",
+  "category": "XML XPath"
 }
     ],
     "keybindings": [
@@ -337,7 +357,7 @@
         "xmlXpath.smartRelativeSignificantAttributes": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["ValuationUseType", "id", "type", "name"],
+          "default": [],
           "description": "Attributes that make an element significant for smart relative XPath"
         },
            "xmlXpath.smartRelativeLandmarkMode": {
@@ -353,13 +373,34 @@
         "xmlXpath.smartRelativeIdentifyingChildren": {
           "type": "array", 
           "items": { "type": "string" },
-          "default": ["ImageCategoryType", "id", "name", "type", "category", "status"],
+          "default": [],
           "description": "Child elements that can identify their parent"
         },
         "xmlXpath.smartRelativeIgnoreLastElement": {
     "type": "boolean",
     "default": false,
     "description": "When enabled, excludes the target element from smart relative XPath, showing only the path to its container"
+  },
+  
+  "xmlXpath.smartRelativeSingleLine": {
+    "type": "boolean",
+    "default": false,
+    "description": "Generate smart relative XPath as single line instead of multi-line format"
+  },
+    "xmlXpath.smartRelativeVirtualRoot": {
+    "type": "string",
+    "default": "",
+    "description": "Virtual root element to start smart relative XPath from (e.g., 'PROPERTY', 'VALUATION'). Empty means use actual document root."
+  },
+  "xmlXpath.smartRelativeVirtualRootMode": {
+    "type": "string",
+    "enum": ["include", "exclude"],
+    "default": "include",
+    "enumDescriptions": [
+      "Include the virtual root element in the XPath",
+      "Exclude the virtual root element, start from its children"
+    ],
+    "description": "Whether to include or exclude the virtual root element in the generated XPath"
   }
       }
  

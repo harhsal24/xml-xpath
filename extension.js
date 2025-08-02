@@ -47,10 +47,13 @@ xpathBuilder.loadConfiguration = function () {
     includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false),
     useSmartRelativePath: cfg.get("useSmartRelativePath", false),
     smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", "d"),
-    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", ["ValuationUseType", "id", "type", "name"]),
-    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", ["ImageCategoryType", "id", "name", "type", "category", "status"]),
-    // In the loadConfiguration override method, add:
+    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", []),
+    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", []),
 smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", false),
+smartRelativeSingleLine: cfg.get("smartRelativeSingleLine", false),
+ smartRelativeVirtualRoot: cfg.get("smartRelativeVirtualRoot", ""),
+    smartRelativeVirtualRootMode: cfg.get("smartRelativeVirtualRootMode", "include"),
+
   };
 };
 
@@ -153,12 +156,100 @@ function registerCommands(context) {
 "xmlXpath.setSmartRelativeNamespacePrefix": setSmartRelativeNamespacePrefix,
  "xmlXpath.setSmartRelativeSignificantAttributes": setSmartRelativeSignificantAttributes,
  "xmlXpath.toggleSmartRelativeIgnoreLastElement": toggleSmartRelativeIgnoreLastElement,
+ "xmlXpath.toggleSmartRelativeSingleLine": toggleSmartRelativeSingleLine,
+"xmlXpath.setSmartRelativeVirtualRoot": setSmartRelativeVirtualRoot,
+"xmlXpath.toggleSmartRelativeVirtualRootMode": toggleSmartRelativeVirtualRootMode,
+"xmlXpath.clearSmartRelativeVirtualRoot": clearSmartRelativeVirtualRoot,
   };
 
   for (const [name, handler] of Object.entries(commands)) {
     context.subscriptions.push(vscode.commands.registerCommand(name, handler));
   }
 }
+
+// Add the command functions:
+async function setSmartRelativeVirtualRoot() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeVirtualRoot", "");
+  
+  // Get current element under cursor as suggestion
+  let tagUnderCursor = "";
+  const editor = vscode.window.activeTextEditor;
+  if (editor && isXmlLanguage(editor.document)) {
+    try {
+      const xml = editor.document.getText();
+      const offset = editor.document.offsetAt(editor.selection.active);
+      const config = xpathBuilder.loadConfiguration();
+      const events = xpathBuilder.tokenizeXML(xml, config);
+      if (events) {
+        const stackResult = xpathBuilder.buildElementStack(events, offset, config);
+        if (stackResult && stackResult.stack.length > 0) {
+          // Suggest a parent element as virtual root
+          if (stackResult.stack.length > 1) {
+            tagUnderCursor = stackResult.stack[stackResult.stack.length - 2].tag;
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error getting tag under cursor:", error);
+    }
+  }
+
+  const value = await vscode.window.showInputBox({
+    prompt: "Virtual root element for smart relative XPath",
+    value: tagUnderCursor || current,
+    placeHolder: "e.g., PROPERTY, VALUATION, DOCUMENT, SERVICE",
+    validateInput: (value) => {
+      if (value && !/^[a-zA-Z][a-zA-Z0-9_\-:.]*$/.test(value)) {
+        return "Must be a valid XML element name";
+      }
+      return null;
+    }
+  });
+
+  if (value !== undefined) {
+    await cfg.update("smartRelativeVirtualRoot", value.trim(), vscode.ConfigurationTarget.Global);
+    update();
+    
+    if (value.trim()) {
+      vscode.window.showInformationMessage(`Virtual root set to: ${value.trim()}`);
+    } else {
+      vscode.window.showInformationMessage("Virtual root cleared - using document root");
+    }
+  }
+}
+
+async function toggleSmartRelativeVirtualRootMode() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeVirtualRootMode", "include");
+  const newMode = current === "include" ? "exclude" : "include";
+  
+  await cfg.update("smartRelativeVirtualRootMode", newMode, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Virtual Root Mode: ${newMode.toUpperCase()}`
+  );
+  update();
+}
+
+async function clearSmartRelativeVirtualRoot() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  await cfg.update("smartRelativeVirtualRoot", "", vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage("Virtual root cleared");
+  update();
+}
+
+// Add the toggle functions:
+async function toggleSmartRelativeSingleLine() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeSingleLine", false);
+  await cfg.update("smartRelativeSingleLine", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Smart Relative Single Line: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
+
 
 // Add the toggle function:
 async function toggleSmartRelativeIgnoreLastElement() {
