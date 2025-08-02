@@ -19,25 +19,28 @@ class XPathBuilder {
     this.parser = new XMLParser(parserOptions);
   }
 
-loadConfiguration() {
-  return {
-    parentTag: null,
-    mode: { includeIndices: true, includeAttributes: true },
-    preferredAttributes: [],
-    ignoreTags: new Set(),
-    disableLeafIndex: false,
-    skipSingleIndex: false,
-    useXlinkLabelIndex: false,
-    useParentScopedIndices: false,
-    ignoreParentSegment: false,
-    predicateTemplate: "[@{attr1}='{attr1V}']",
-    xlinkLabelPattern: { type: "any", pattern: "" },
-    forceIndexOneFor: new Set(),
-    exceptionsToIndexOneForcing: new Set(),
-    useAttributeBasedIndexing: false, // ADD THIS
-    attributeBasedIndexingAttribute: "" // ADD THIS
-  };
-}
+  loadConfiguration() {
+    return {
+      parentTag: null,
+      mode: { includeIndices: true, includeAttributes: true },
+      preferredAttributes: [],
+      ignoreTags: new Set(),
+      disableLeafIndex: false,
+      skipSingleIndex: false,
+      useXlinkLabelIndex: false,
+      useParentScopedIndices: false,
+      ignoreParentSegment: false,
+      predicateTemplate: "[@{attr1}='{attr1V}']",
+      xlinkLabelPattern: { type: "any", pattern: "" },
+      forceIndexOneFor: new Set(),
+      exceptionsToIndexOneForcing: new Set(),
+      useAttributeBasedIndexing: false,
+      attributeBasedIndexingAttribute: "",
+      useRelativePath: false,
+      includeNamespaces: false,
+      includeDefaultNamespaces: false,
+    };
+  }
 
   buildXPathRegex(document, position) {
     const xml = document.getText();
@@ -63,7 +66,7 @@ loadConfiguration() {
     let match;
     try {
       while ((match = tokenRegex.exec(cleanedXml))) {
-        const event = this.parseXMLToken(match, config); // Pass config
+        const event = this.parseXMLToken(match, config);
         if (event) {
           events.push(event);
           if (event.type === "open" && event.selfClose) {
@@ -124,45 +127,50 @@ $$\\]>         # Closing ]]> (Corrected)
     return processed;
   }
 
-// In the tokenizeXML method, make sure event parsing includes xlink processing
- parseXMLToken(match, config) {
-  const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
-  const pos = match.index;
-  
-  if (closeSlash) {
-    return { type: "close", tag, pos: pos + fullMatch.length };
+  // In the tokenizeXML method, make sure event parsing includes xlink processing
+  parseXMLToken(match, config) {
+    const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
+    const pos = match.index;
+
+    if (closeSlash) {
+      return { type: "close", tag, pos: pos + fullMatch.length };
+    }
+
+    const attrs = this.parseAttributes(attrsText || "");
+    const xlinkData = this.parseXlinkLabel(attrs, config);
+
+    const namespaces = this.extractNamespaceInfo(attrsText || "");
+
+    return {
+      type: "open",
+      tag,
+      attrs,
+      pos,
+      selfClose: !!selfCloseSlash,
+      namespaces: Object.keys(namespaces).length > 0 ? namespaces : null,
+      ...xlinkData,
+    };
   }
-  
-  const attrs = this.parseAttributes(attrsText || "");
-  const xlinkData = this.parseXlinkLabel(attrs, config);
-  
-  return {
-    type: "open",
-    tag,
-    attrs,
-    pos,
-    selfClose: !!selfCloseSlash,
-    ...xlinkData, // This includes customIndex and customIndexRaw
-  };
-}
 
   parseAttributes(attrsText) {
     const attrs = {};
-    // Updated regex to handle namespaced attributes better
+    // Enhanced regex to better handle namespaced attributes
     const attrRegex = /([\w:\-\.]+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
     let match;
+
     while ((match = attrRegex.exec(attrsText))) {
       const attrName = match[1];
       const attrValue = match[3];
 
-      // Store all attributes (including xlink:label)
+      // Store all attributes (including xmlns declarations)
       attrs[attrName] = attrValue;
 
-      // Also check for common typos/variations
+      // Handle common typos
       if (attrName === "xlink:lable") {
-        attrs["xlink:label"] = attrValue; // Fix common typo
+        attrs["xlink:label"] = attrValue;
       }
     }
+
     return attrs;
   }
 
@@ -245,133 +253,158 @@ $$\\]>         # Closing ]]> (Corrected)
     return { customIndex, customIndexRaw: raw };
   }
 
-buildElementStack(events, offset, config) {
-  const currentStack = [];
-  let targetStack = [];
-  const counters = config.useParentScopedIndices ? {} : [];
-  const attributeCounters = {}; // For attribute-based indexing
+  buildElementStack(events, offset, config) {
+    const currentStack = [];
+    let targetStack = [];
+    const counters = config.useParentScopedIndices ? {} : [];
+    const attributeCounters = {};
 
-  for (const event of events) {
-    if (event.pos > offset && !targetStack.length) {
-      targetStack = [...currentStack];
-    }
+    // NEW: Build namespace map if namespaces are enabled
+    const namespaceMap =
+      config.includeNamespaces || config.includeDefaultNamespaces
+        ? this.buildNamespaceMap(events)
+        : {};
 
-    if (event.type === "open") {
-      let idx;
-      
-      // Determine which attribute to use for indexing
-      let indexingAttribute = null;
-      let indexingValue = null;
-      
-      if (config.useAttributeBasedIndexing) {
-        // Use first preferred attribute for indexing
-        if (config.preferredAttributes && config.preferredAttributes.length > 0) {
-          for (const attr of config.preferredAttributes) {
-            if (event.attrs && event.attrs[attr]) {
-              indexingAttribute = attr;
-              indexingValue = event.attrs[attr];
-              break;
+    for (const event of events) {
+      if (event.pos > offset && !targetStack.length) {
+        targetStack = [...currentStack];
+      }
+
+      if (event.type === "open") {
+        let idx;
+
+        // Determine which attribute to use for indexing
+        let indexingAttribute = null;
+        let indexingValue = null;
+
+        if (config.useAttributeBasedIndexing) {
+          if (
+            config.preferredAttributes &&
+            config.preferredAttributes.length > 0
+          ) {
+            for (const attr of config.preferredAttributes) {
+              if (event.attrs && event.attrs[attr]) {
+                indexingAttribute = attr;
+                indexingValue = event.attrs[attr];
+                break;
+              }
             }
           }
         }
-      }
-      
-      // Calculate index based on mode
-      if (config.useAttributeBasedIndexing && indexingAttribute && indexingValue) {
-        // Attribute-based indexing
-        const depth = currentStack.length;
-        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
-        
-        if (!attributeCounters[key]) {
-          attributeCounters[key] = 0;
+
+        // Calculate index based on mode
+        if (
+          config.useAttributeBasedIndexing &&
+          indexingAttribute &&
+          indexingValue
+        ) {
+          const depth = currentStack.length;
+          const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
+
+          if (!attributeCounters[key]) {
+            attributeCounters[key] = 0;
+          }
+          attributeCounters[key]++;
+          idx = attributeCounters[key];
+        } else if (config.useParentScopedIndices) {
+          const parentPath = currentStack
+            .map((e) => `${e.tag}[${e.idx}]`)
+            .join("/");
+          if (!counters[parentPath]) counters[parentPath] = {};
+          counters[parentPath][event.tag] =
+            (counters[parentPath][event.tag] || 0) + 1;
+          idx = counters[parentPath][event.tag];
+        } else {
+          const depth = currentStack.length;
+          if (!counters[depth]) counters[depth] = {};
+          counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
+          idx = counters[depth][event.tag];
         }
-        attributeCounters[key]++;
-        idx = attributeCounters[key];
-      } else if (config.useParentScopedIndices) {
-        // Parent-scoped indexing (existing code)
-        const parentPath = currentStack
-          .map((e) => `${e.tag}[${e.idx}]`)
-          .join("/");
-        if (!counters[parentPath]) counters[parentPath] = {};
-        counters[parentPath][event.tag] =
-          (counters[parentPath][event.tag] || 0) + 1;
-        idx = counters[parentPath][event.tag];
-      } else {
-        // Depth-based indexing (existing code)
-        const depth = currentStack.length;
-        if (!counters[depth]) counters[depth] = {};
-        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-        idx = counters[depth][event.tag];
-      }
-      
-      // Collect ALL preferred attributes for this element
-      const preferredAttrs = [];
-      if (event.attrs && config.preferredAttributes) {
-        for (const attrName of config.preferredAttributes) {
-          if (event.attrs[attrName]) {
-            preferredAttrs.push({
-              name: attrName,
-              value: event.attrs[attrName]
-            });
+
+        // Collect ALL preferred attributes for this element
+        const preferredAttrs = [];
+        if (event.attrs && config.preferredAttributes) {
+          for (const attrName of config.preferredAttributes) {
+            if (event.attrs[attrName]) {
+              preferredAttrs.push({
+                name: attrName,
+                value: event.attrs[attrName],
+              });
+            }
           }
         }
-      }
-      
-      currentStack.push({
-        tag: event.tag,
-        idx,
-        customIndex: event.customIndex,
-        customIndexRaw: event.customIndexRaw,
-        attrs: event.attrs,
-        // Store the attribute used for indexing
-        indexingAttribute: indexingAttribute,
-        indexingValue: indexingValue,
-        // Store ALL preferred attributes
-        preferredAttrs: preferredAttrs
-      });
-    } else if (event.type === "close") {
-      if (
-        currentStack.length > 0 &&
-        currentStack[currentStack.length - 1].tag === event.tag
-      ) {
-        if (event.pos >= offset && !targetStack.length) {
-          targetStack = [...currentStack];
-        }
-        currentStack.pop();
-      }
-    }
-  }
-  
-  if (!targetStack.length && currentStack.length > 0) {
-    targetStack = [...currentStack];
-  }
-  return { stack: targetStack };
-}
 
-generateXPathSegment(node, index, pathLength, config) {
-  const isLeaf = index === pathLength - 1;
-  let segment = node.tag;
-  
-  // For attribute-based indexing, include ALL preferred attributes
-  if (config.useAttributeBasedIndexing && node.preferredAttrs && node.preferredAttrs.length > 0) {
-    // Add all preferred attributes as predicates
-    for (const attr of node.preferredAttrs) {
-      const escapedValue = this.escapeAttributeValue(attr.value);
-      segment += `[@${attr.name}='${escapedValue}']`;
+        // NEW: Get namespace context for this element
+        const namespaceContext =
+          namespaceMap[`${event.pos}-${event.tag}`] || {};
+
+        currentStack.push({
+          tag: event.tag,
+          idx,
+          customIndex: event.customIndex,
+          customIndexRaw: event.customIndexRaw,
+          attrs: event.attrs,
+          indexingAttribute: indexingAttribute,
+          indexingValue: indexingValue,
+          preferredAttrs: preferredAttrs,
+          // NEW: Store namespace context
+          namespaceContext: namespaceContext,
+        });
+      } else if (event.type === "close") {
+        if (
+          currentStack.length > 0 &&
+          currentStack[currentStack.length - 1].tag === event.tag
+        ) {
+          if (event.pos >= offset && !targetStack.length) {
+            targetStack = [...currentStack];
+          }
+          currentStack.pop();
+        }
+      }
     }
-  } else {
-    // Normal mode - use the selectPreferredAttribute logic
-    if (node.preferredAttrs && node.preferredAttrs.length > 0) {
-      // Use first preferred attribute only
-      const attr = node.preferredAttrs[0];
-      const escapedValue = this.escapeAttributeValue(attr.value);
-      segment += `[@${attr.name}='${escapedValue}']`;
+
+    if (!targetStack.length && currentStack.length > 0) {
+      targetStack = [...currentStack];
     }
+    return { stack: targetStack };
   }
-  
-  segment += this.generateIndex(node, isLeaf, config);
-  return segment;
-}
+
+  generateXPathSegment(node, index, pathLength, config) {
+    const isLeaf = index === pathLength - 1;
+
+    // NEW: Apply namespace prefix if enabled
+    let tagName = node.tag;
+    if (config.includeNamespaces || config.includeDefaultNamespaces) {
+      tagName = this.addNamespacePrefix(
+        node.tag,
+        node.namespaceContext,
+        config
+      );
+    }
+
+    let segment = tagName;
+
+    // For attribute-based indexing, include ALL preferred attributes
+    if (
+      config.useAttributeBasedIndexing &&
+      node.preferredAttrs &&
+      node.preferredAttrs.length > 0
+    ) {
+      for (const attr of node.preferredAttrs) {
+        const escapedValue = this.escapeAttributeValue(attr.value);
+        segment += `[@${attr.name}='${escapedValue}']`;
+      }
+    } else {
+      if (node.preferredAttrs && node.preferredAttrs.length > 0) {
+        const attr = node.preferredAttrs[0];
+        const escapedValue = this.escapeAttributeValue(attr.value);
+        segment += `[@${attr.name}='${escapedValue}']`;
+      }
+    }
+
+    segment += this.generateIndex(node, isLeaf, config);
+    return segment;
+  }
 
   selectPreferredAttribute(attrs, preferredList = []) {
     for (const preferred of preferredList) {
@@ -395,12 +428,18 @@ generateXPathSegment(node, index, pathLength, config) {
 
   generateXPath(path, config) {
     if (!path || path.length === 0) return "";
+
+    // NEW: Use relative path if enabled
+    if (config.useRelativePath) {
+      return this.generateRelativeXPath(path, config);
+    }
+
+    // Original absolute path logic
     const segments = path.map((node, index) =>
       this.generateXPathSegment(node, index, path.length, config)
     );
     return "/" + segments.join("/");
   }
-
 
   escapeAttributeValue(value) {
     return String(value).replace(/'/g, "&apos;");
@@ -580,6 +619,115 @@ generateXPathSegment(node, index, pathLength, config) {
 
     // For all other indices (not 1), always show
     return `[${index}]`;
+  }
+  // Extract namespace declarations from attributes
+  extractNamespaceInfo(attrsText) {
+    const namespaces = {};
+    const xmlnsRegex =
+      /xmlns(?::([^=\s]+))?\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
+    let match;
+
+    while ((match = xmlnsRegex.exec(attrsText))) {
+      const prefix = match[1] || "default"; // null prefix means default namespace
+      const uri = match[3];
+      namespaces[prefix] = uri;
+    }
+
+    return namespaces;
+  }
+
+  // Build namespace map from all events in document
+  buildNamespaceMap(events) {
+    const namespaceMap = {};
+    const stack = [];
+
+    for (const event of events) {
+      if (event.type === "open") {
+        // Inherit parent namespaces
+        const currentContext =
+          stack.length > 0 ? { ...stack[stack.length - 1].namespaces } : {};
+
+        // Add any new namespace declarations from this element
+        if (event.namespaces) {
+          Object.assign(currentContext, event.namespaces);
+        }
+
+        stack.push({
+          tag: event.tag,
+          namespaces: currentContext,
+        });
+
+        // Store namespace context for this tag
+        namespaceMap[`${event.pos}-${event.tag}`] = currentContext;
+      } else if (event.type === "close") {
+        if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) {
+          stack.pop();
+        }
+      }
+    }
+
+    return namespaceMap;
+  }
+
+  // Resolve namespace prefix for a tag name
+  resolveNamespacePrefix(tagName, namespaceContext) {
+    if (!tagName.includes(":")) {
+      return {
+        prefix: null,
+        localName: tagName,
+        namespace: namespaceContext.default,
+      };
+    }
+
+    const colonIndex = tagName.indexOf(":");
+    const prefix = tagName.substring(0, colonIndex);
+    const localName = tagName.substring(colonIndex + 1);
+    const namespace = namespaceContext[prefix];
+
+    return { prefix, localName, namespace };
+  }
+
+  // Add namespace prefix to tag name based on config
+  addNamespacePrefix(tagName, namespaceContext, config) {
+    if (!config.includeNamespaces) {
+      return tagName;
+    }
+
+    const nsInfo = this.resolveNamespacePrefix(tagName, namespaceContext || {});
+
+    // If tag already has prefix, keep it
+    if (nsInfo.prefix) {
+      return tagName;
+    }
+
+    // For default namespace handling
+    if (config.includeDefaultNamespaces && nsInfo.namespace) {
+      // Find prefix for this namespace URI
+      for (const [prefix, uri] of Object.entries(namespaceContext || {})) {
+        if (uri === nsInfo.namespace && prefix !== "default") {
+          return `${prefix}:${nsInfo.localName}`;
+        }
+      }
+
+      // If default namespace and no prefix found, might need special handling
+      if (nsInfo.namespace && namespaceContext?.default === nsInfo.namespace) {
+        return `*[local-name()='${nsInfo.localName}']`;
+      }
+    }
+
+    return tagName;
+  }
+
+  // Generate relative XPath using // syntax
+  generateRelativeXPath(path, config) {
+    if (!path || path.length === 0) return "";
+
+    const segments = path.map((node, index) =>
+      this.generateXPathSegment(node, index, path.length, config)
+    );
+
+    // Use // for relative path
+    return "//" + segments.join("/");
   }
 }
 

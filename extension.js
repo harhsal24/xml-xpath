@@ -41,7 +41,10 @@ xpathBuilder.loadConfiguration = function () {
     attributeBasedIndexingAttribute: cfg.get(
       "attributeBasedIndexingAttribute",
       ""
-    ), // ADD THIS
+    ),
+    useRelativePath: cfg.get("useRelativePath", false),
+    includeNamespaces: cfg.get("includeNamespaces", false),
+    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false), 
   };
 };
 
@@ -137,6 +140,9 @@ function registerCommands(context) {
       toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
     "xmlXpath.setAttributeBasedIndexingAttribute":
       setAttributeBasedIndexingAttribute,
+       "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
+    "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
+    "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -144,7 +150,39 @@ function registerCommands(context) {
   }
 }
 
-// Add this new function:
+// NEW: Toggle relative path
+async function toggleUseRelativePath() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("useRelativePath", false);
+  await cfg.update("useRelativePath", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Use Relative Path: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
+// NEW: Toggle include namespaces
+async function toggleIncludeNamespaces() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("includeNamespaces", false);
+  await cfg.update("includeNamespaces", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Include Namespaces: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
+// NEW: Toggle include default namespaces (continued)
+async function toggleIncludeDefaultNamespaces() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("includeDefaultNamespaces", false);
+  await cfg.update("includeDefaultNamespaces", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(
+    `Include Default Namespaces: ${!current ? "ON" : "OFF"}`
+  );
+  update();
+}
+
 async function setAttributeBasedIndexingAttribute() {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const current = cfg.get("attributeBasedIndexingAttribute", "");
@@ -418,6 +456,7 @@ async function copyUniversalXPath() {
         useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
         attributeBasedIndexingAttribute:
           currentConfig.attributeBasedIndexingAttribute,
+          
       };
     };
 
