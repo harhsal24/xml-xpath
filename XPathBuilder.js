@@ -977,7 +977,7 @@ generateSmartRelativeXPath(path, config) {
 }
 
 
-// FIXED: Generate single line smart XPath with proper virtual root handling
+// REPLACE the generateSingleLineSmartXPath method:
 generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
   const segments = [];
   
@@ -985,11 +985,32 @@ generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) 
     const element = landmark.element;
     let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
     
-    const identifier = this.getElementIdentifier(element, config, prefix);
-    if (identifier) {
-      segment += identifier;
-    } else if (landmark.isTarget) {
-      segment += this.generateIndex(element, true, config);
+    // Check if we should use attribute-based indexing for this element
+    if (config.useAttributeBasedIndexing && 
+        element.attrs && 
+        config.attributeBasedIndexingAttribute &&
+        element.attrs[config.attributeBasedIndexingAttribute]) {
+      
+      // For attribute-based indexing, include both attribute and index
+      const attrName = config.attributeBasedIndexingAttribute;
+      const attrValue = element.attrs[attrName];
+      const escapedValue = this.escapeAttributeValue(attrValue);
+      
+      segment += `[@${attrName}='${escapedValue}']`;
+      
+      // Add the attribute-based index
+      const index = element.idx || element.index;
+      if (index > 1 || (index === 1 && !config.skipSingleIndex)) {
+        segment += `[${index}]`;
+      }
+    } else {
+      // Use regular identifier logic
+      const identifier = this.getElementIdentifier(element, config, prefix);
+      if (identifier) {
+        segment += identifier;
+      } else if (landmark.isTarget) {
+        segment += this.generateIndex(element, true, config);
+      }
     }
     
     segments.push(segment);
@@ -999,16 +1020,16 @@ generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) 
   if (hasVirtualRoot) {
     return "//" + segments.join("//");
   } else {
-    // Traditional format for document root
+    // For your use case, you probably want regular path joins, not //
     if (segments.length === 1) {
       return "/" + segments[0];
     } else {
-      return "/" + segments[0] + "//" + segments.slice(1).join("//");
+      return "/" + segments.join("/");  // Changed from // to /
     }
   }
 }
 
-// FIXED: Generate multi-line smart XPath with proper virtual root handling
+// REPLACE the generateMultiLineSmartXPath method:
 generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
   let result = "";
   const indent = "    ";
@@ -1019,14 +1040,35 @@ generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
     
     let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
     
-    const identifier = this.getElementIdentifier(element, config, prefix);
-    if (identifier) {
-      segment += identifier;
-    } else if (landmark.isTarget) {
-      segment += this.generateIndex(element, true, config);
+    // Check if we should use attribute-based indexing for this element
+    if (config.useAttributeBasedIndexing && 
+        element.attrs && 
+        config.attributeBasedIndexingAttribute &&
+        element.attrs[config.attributeBasedIndexingAttribute]) {
+      
+      // For attribute-based indexing, include both attribute and index
+      const attrName = config.attributeBasedIndexingAttribute;
+      const attrValue = element.attrs[attrName];
+      const escapedValue = this.escapeAttributeValue(attrValue);
+      
+      segment += `[@${attrName}='${escapedValue}']`;
+      
+      // Add the attribute-based index
+      const index = element.idx || element.index;
+      if (index > 1 || (index === 1 && !config.skipSingleIndex)) {
+        segment += `[${index}]`;
+      }
+    } else {
+      // Use regular identifier logic
+      const identifier = this.getElementIdentifier(element, config, prefix);
+      if (identifier) {
+        segment += identifier;
+      } else if (landmark.isTarget) {
+        segment += this.generateIndex(element, true, config);
+      }
     }
     
-    // When using virtual root, ALWAYS use // format
+    // Format the path segments
     if (hasVirtualRoot) {
       if (i === 0) {
         result += `//${segment}`;
@@ -1034,13 +1076,11 @@ generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
         result += `\n${indent}//${segment}`;
       }
     } else {
-      // Traditional format for document root
-      if (landmark.isRoot && i === 0) {
+      // Use regular path formatting for non-virtual root
+      if (i === 0) {
         result += `/${segment}`;
-      } else if (i === 0) {
-        result += `//${segment}`;
       } else {
-        result += `\n${indent}//${segment}`;
+        result += `/${segment}`;  // Direct path, not //
       }
     }
   }
@@ -1048,14 +1088,28 @@ generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
   return result;
 }
 
-// NEW: Get the best identifier for an element (attribute or child element)
 // REPLACE the current getElementIdentifier method with this:
 getElementIdentifier(element, config, prefix) {
   // First try actual attributes
   const sigAttr = this.findSignificantAttribute(element, config);
   if (sigAttr) {
     const escapedValue = this.escapeAttributeValue(sigAttr.value);
-    return `[@${sigAttr.name}='${escapedValue}']`;
+    let identifier = `[@${sigAttr.name}='${escapedValue}']`;
+    
+    // ADD: Include attribute-based index if enabled
+    if (config.useAttributeBasedIndexing && 
+        config.attributeBasedIndexingAttribute === sigAttr.name) {
+      
+      // Use the attribute-based index that was calculated during stack building
+      const index = element.idx || element.index;
+      if (index && index > 1) {
+        identifier += `[${index}]`;
+      } else if (index === 1 && !config.skipSingleIndex) {
+        identifier += `[1]`;
+      }
+    }
+    
+    return identifier;
   }
   
   // Then try identifying children (as pseudo-attributes)
@@ -1067,6 +1121,7 @@ getElementIdentifier(element, config, prefix) {
   
   return null;
 }
+
 // NEW: Check if element has identifying children
 hasIdentifyingChildren(element, config) {
   return element.identifyingChildren && element.identifyingChildren.length > 0;
