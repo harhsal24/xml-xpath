@@ -1,5 +1,4 @@
-// ========== File: XPathBuilder.js (Updated: explicit-empty disables identifying children) ==========
-
+// ========== File: XPathBuilder.js (Updated: explicit-empty disables identifying children; relative-mode enhancements) ==========
 const { XMLParser } = require("fast-xml-parser");
 
 const parserOptions = {
@@ -19,6 +18,7 @@ class XPathBuilder {
     this.parser = new XMLParser(parserOptions);
   }
 
+  // Default configuration values
   loadConfiguration() {
     return {
       parentTag: null,
@@ -39,10 +39,13 @@ class XPathBuilder {
       useRelativePath: false,
       includeNamespaces: false,
       includeDefaultNamespaces: false,
+
+      // Smart-relative existing:
       useSmartRelativePath: false,
       smartRelativeNamespacePrefix: "d",
       smartRelativeSignificantAttributes: [],
-      smartRelativeIdentifyingChildren: [],
+      // if undefined -> fallback defaults; if [] -> explicit disable
+      smartRelativeIdentifyingChildren: undefined,
       smartRelativeSingleLine: false,
       smartRelativeVirtualRoot: "",
       smartRelativeVirtualRootMode: "include",
@@ -51,13 +54,36 @@ class XPathBuilder {
       smartRelativeDontIgnoreAfter: "",
       smartRelativeLandmarkMode: true,
       smartRelativeIndentSize: 4,
+
+      // NEW: Relative mode / general options (mirror smart-relative capabilities)
+      relativeMustIncludeTags: [],
+      relativeMustIgnoreTags: [],
+      relativeDontIgnoreAfter: "",
+      relativeNamespacePrefix: "d",
     };
   }
 
-  buildXPathRegex(document, position) {
+  // buildXPathRegex: now accepts optional config overrides (from workspace settings)
+  buildXPathRegex(document, position, configOverride = {}) {
     const xml = document.getText();
     const offset = document.offsetAt(position);
-    const config = this.loadConfiguration();
+
+    // Merge configurations
+    const baseConfig = this.loadConfiguration();
+    const config = { ...baseConfig, ...(configOverride || {}) };
+
+    // Convert certain array-based settings into Sets where needed
+    if (Array.isArray(config.ignoreTags)) config.ignoreTags = new Set(config.ignoreTags);
+    if (Array.isArray(config.forceIndexOneFor)) config.forceIndexOneFor = new Set(config.forceIndexOneFor);
+    if (Array.isArray(config.exceptionsToIndexOneForcing)) config.exceptionsToIndexOneForcing = new Set(config.exceptionsToIndexOneForcing);
+
+    // Ensure smartRelativeIdentifyingChildren uses undefined vs explicit empty array semantics:
+    if (configOverride && Object.prototype.hasOwnProperty.call(configOverride, "smartRelativeIdentifyingChildren")) {
+      // keep whatever the user provided (could be [])
+      // nothing else to do
+    } else if (baseConfig.smartRelativeIdentifyingChildren === undefined && config.smartRelativeIdentifyingChildren === undefined) {
+      // leave undefined to allow fallback defaults later
+    }
 
     const events = this.tokenizeXML(xml, config);
     if (!events) return null;
@@ -521,21 +547,21 @@ class XPathBuilder {
 
     if (index === 1 &&
       config.exceptionsToIndexOneForcing &&
-      config.exceptionsToIndexOneForcing.has(node.tag)) {
+      config.exceptionsToIndexOneForcing.has && config.exceptionsToIndexOneForcing.has(node.tag)) {
       return "";
     }
 
     if (index === 1) {
       if (config.skipSingleIndex) {
-        if (config.forceIndexOneFor && config.forceIndexOneFor.has(node.tag)) return "[1]";
-        if (config.ignoreTags && config.ignoreTags.has(node.tag)) return "";
+        if (config.forceIndexOneFor && config.forceIndexOneFor.has && config.forceIndexOneFor.has(node.tag)) return "[1]";
+        if (config.ignoreTags && config.ignoreTags.has && config.ignoreTags.has(node.tag)) return "";
         return "";
       } else {
-        if (!config.forceIndexOneFor || config.forceIndexOneFor.size === 0) {
+        if (!config.forceIndexOneFor || (config.forceIndexOneFor && config.forceIndexOneFor.size === 0)) {
           return "[1]";
         }
-        if (config.forceIndexOneFor.has(node.tag)) return "[1]";
-        if (config.ignoreTags && config.ignoreTags.has(node.tag)) return "";
+        if (config.forceIndexOneFor && config.forceIndexOneFor.has && config.forceIndexOneFor.has(node.tag)) return "[1]";
+        if (config.ignoreTags && config.ignoreTags.has && config.ignoreTags.has(node.tag)) return "";
         return "";
       }
     }
@@ -575,12 +601,12 @@ class XPathBuilder {
 
   resolveNamespacePrefix(tagName, namespaceContext) {
     if (!tagName.includes(":")) {
-      return { prefix: null, localName: tagName, namespace: namespaceContext.default };
+      return { prefix: null, localName: tagName, namespace: namespaceContext?.default };
     }
     const colonIndex = tagName.indexOf(":");
     const prefix = tagName.substring(0, colonIndex);
     const localName = tagName.substring(colonIndex + 1);
-    const namespace = namespaceContext[prefix];
+    const namespace = namespaceContext && namespaceContext[prefix];
     return { prefix, localName, namespace };
   }
 
@@ -603,23 +629,125 @@ class XPathBuilder {
     return tagName;
   }
 
+  // --- Relative XPath generator (enhanced) ---
   generateRelativeXPath(path, config) {
     if (!path || path.length === 0) return "";
-    const segments = path.map((node, index) => this.generateXPathSegment(node, index, path.length, config));
-    return "//" + segments.join("/");
-  }
+    const prefix = (config.includeNamespaces) ? (config.relativeNamespacePrefix || config.smartRelativeNamespacePrefix || "d") : null;
 
-  findSignificantAncestor(stack, config) {
-    if (!config.smartRelativeSignificantAttributes || config.smartRelativeSignificantAttributes.length === 0) return -1;
-    for (let i = stack.length - 1; i >= 0; i--) {
-      const element = stack[i];
-      if (element.attrs) {
-        for (const sigAttr of config.smartRelativeSignificantAttributes) {
-          if (element.attrs[sigAttr]) return i;
-        }
+    // Build absolute-effect path first (already provided as `path`).
+    let effectivePath = path.slice();
+
+    // if relativeDontIgnoreAfter provided: find anchor and start from it
+    let startIndex = 0;
+    if (config.relativeDontIgnoreAfter) {
+      const anchorTag = config.relativeDontIgnoreAfter;
+      const anchorIndex = effectivePath.findIndex(el => el.tag === anchorTag);
+      if (anchorIndex >= 0) {
+        startIndex = anchorIndex;
+      } else {
+        startIndex = 0;
       }
     }
-    return -1;
+
+    const mustInclude = Array.isArray(config.relativeMustIncludeTags) ? config.relativeMustIncludeTags.slice() : [];
+    const mustIgnore = Array.isArray(config.relativeMustIgnoreTags) ? config.relativeMustIgnoreTags.slice() : [];
+    const sigAttrs = Array.isArray(config.smartRelativeSignificantAttributes) ? config.smartRelativeSignificantAttributes : [];
+
+    const landmarks = [];
+
+    // Always include the first relevant root element (startIndex)
+    if (effectivePath[startIndex]) {
+      landmarks.push({
+        element: effectivePath[startIndex],
+        isRoot: true,
+        isTarget: (startIndex === effectivePath.length - 1)
+      });
+    }
+
+    for (let i = startIndex; i < effectivePath.length; i++) {
+      const element = effectivePath[i];
+
+      // Explicit ignore list takes precedence
+      if (mustIgnore.includes(element.tag)) continue;
+
+      // If tag is in mustInclude, always add
+      if (mustInclude.includes(element.tag)) {
+        landmarks.push({
+          element,
+          isRoot: false,
+          isTarget: i === effectivePath.length - 1
+        });
+        continue;
+      }
+
+      // If it has a significant attribute -> include
+      let hasSigAttr = false;
+      if (element.attrs && sigAttrs && sigAttrs.length) {
+        for (const a of sigAttrs) {
+          if (element.attrs[a]) {
+            hasSigAttr = true;
+            break;
+          }
+        }
+      }
+      if (hasSigAttr) {
+        landmarks.push({
+          element,
+          isRoot: false,
+          isTarget: i === effectivePath.length - 1
+        });
+        continue;
+      }
+
+      // If attribute-based indexing is in effect and this element has the attribute -> include
+      if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute) {
+        const abAttr = config.attributeBasedIndexingAttribute;
+        if (element.attrs && element.attrs[abAttr]) {
+          landmarks.push({
+            element,
+            isRoot: false,
+            isTarget: i === effectivePath.length - 1
+          });
+          continue;
+        }
+      }
+
+      // Otherwise: only include the final (target) element
+      if (i === effectivePath.length - 1) {
+        landmarks.push({
+          element,
+          isRoot: false,
+          isTarget: true
+        });
+      }
+    }
+
+    // If no landmarks (unlikely), fallback to classic //with all segments
+    if (!landmarks.length) {
+      const allSegments = effectivePath.map((node, idx) => {
+        const name = prefix ? `${prefix}:${node.tag}` : node.tag;
+        const pseudo = { ...node };
+        const identifier = this.getElementIdentifier(pseudo, config, prefix);
+        let seg = name;
+        if (identifier) seg += identifier;
+        else seg += this.generateIndex(pseudo, idx === effectivePath.length - 1, config);
+        return seg;
+      });
+      return "//" + allSegments.join("/");
+    }
+
+    // Build final xpath string from landmarks
+    const segments = landmarks.map((lm, idx) => {
+      const element = lm.element;
+      const name = prefix ? `${prefix}:${element.tag}` : element.tag;
+      const identifier = this.getElementIdentifier(element, config, prefix);
+      let seg = name;
+      if (identifier) seg += identifier;
+      else if (lm.isTarget) seg += this.generateIndex(element, true, config);
+      return seg;
+    });
+
+    return "//" + segments.join("//");
   }
 
   generateSmartRelativeXPath(path, config) {

@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.2",
+  "version": "3.5.4",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -49,7 +49,11 @@
     "onCommand:xmlXpath.addIdentifyingChildFromCursor",
     "onCommand:xmlXpath.removeIdentifyingChildFromCursor",
     "onCommand:xmlXpath.clearIdentifyingChildren",
-    "onCommand:xmlXpath.listIdentifyingChildren"
+    "onCommand:xmlXpath.listIdentifyingChildren",
+    "onCommand:xmlXpath.setRelativeMustIncludeTags",
+    "onCommand:xmlXpath.setRelativeMustIgnoreTags",
+    "onCommand:xmlXpath.setRelativeDontIgnoreAfter",
+    "onCommand:xmlXpath.clearRelativeDontIgnoreAfter"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -247,6 +251,26 @@
       {
         "command": "xmlXpath.listIdentifyingChildren",
         "title": "XML XPath: List Smart-Relative Identifying Children",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.setRelativeMustIncludeTags",
+        "title": "XML XPath: Set Relative Must-Include Tags",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.setRelativeMustIgnoreTags",
+        "title": "XML XPath: Set Relative Must-Ignore Tags",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.setRelativeDontIgnoreAfter",
+        "title": "XML XPath: Set Relative 'Don't Ignore After' Anchor",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.clearRelativeDontIgnoreAfter",
+        "title": "XML XPath: Clear Relative 'Don't Ignore After' Anchor",
         "category": "XML XPath"
       }
     ],
@@ -501,6 +525,28 @@
           "type": "string",
           "default": "",
           "description": "Anchor element tag name: when set, Smart Relative mode will NOT ignore any elements that appear after this anchor element in the ancestor chain."
+        },
+        "xmlXpath.relativeMustIncludeTags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Tags that must be included when generating relative XPath (landmarks)."
+        },
+        "xmlXpath.relativeMustIgnoreTags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Tags to always ignore in relative XPath generation."
+        },
+        "xmlXpath.relativeDontIgnoreAfter": {
+          "type": "string",
+          "default": "",
+          "description": "Anchor tag name for relative mode: when set, elements after this ancestor will not be removed/ignored."
+        },
+        "xmlXpath.relativeNamespacePrefix": {
+          "type": "string",
+          "default": "d",
+          "description": "Namespace prefix to use in relative XPath when includeNamespaces is enabled."
         }
       }
     }

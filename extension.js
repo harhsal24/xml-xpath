@@ -1,1406 +1,561 @@
-// ========== File: extension.js ==========
-
+// extension.js — cleaned, refactored, notification toggle + richer notifications
 const vscode = require("vscode");
-const XPathBuilder = require("./XPathBuilder.js");
+const XPathBuilder = require("./XPathBuilder");
 
-const CONFIG_SECTION = "xmlXpath";
-let statusBarItem;
+let statusBarItem = null;
+let builder = null;
 
-let lastSearchXPath = "";
-let lastSearchResults = [];
-let currentSearchIndex = 0;
+function defaultConfig() {
+  return {
+    parentTag: null,
+    mode: { includeIndices: true, includeAttributes: true },
+    preferredAttributes: [],
+    ignoreTags: [],
+    disableLeafIndex: false,
+    skipSingleIndex: false,
+    useXlinkLabelIndex: false,
+    useParentScopedIndices: false,
+    ignoreParentSegment: false,
+    predicateTemplate: "[@{attr1}='{attr1V}']",
+    xlinkLabelPattern: { type: "any", pattern: "" },
+    forceIndexOneFor: [],
+    exceptionsToIndexOneForcing: [],
+    useAttributeBasedIndexing: false,
+    attributeBasedIndexingAttribute: "",
+    useRelativePath: false,
+    includeNamespaces: false,
+    includeDefaultNamespaces: false,
+    useSmartRelativePath: false,
+    smartRelativeNamespacePrefix: "d",
+    smartRelativeSignificantAttributes: [],
+    smartRelativeIdentifyingChildren: undefined,
+    smartRelativeSingleLine: false,
+    smartRelativeVirtualRoot: "",
+    smartRelativeVirtualRootMode: "include",
+    smartRelativeIgnoreLastElement: false,
+    smartRelativeAlwaysIncludeTags: [],
+    smartRelativeDontIgnoreAfter: "",
+    smartRelativeLandmarkMode: true,
+    smartRelativeIndentSize: 4,
+    relativeMustIncludeTags: [],
+    relativeMustIgnoreTags: [],
+    relativeDontIgnoreAfter: "",
+    relativeNamespacePrefix: "d",
+    // NEW (local-only default): controls whether we show popup messages
+    showNotifications: true
+  };
+}
 
-// Global instance of our pure logic class
-const xpathBuilder = new XPathBuilder();
-
-// We override the 'loadConfiguration' method on our instance
-// to use the real VS Code API. This is a clean way to inject dependencies.
-xpathBuilder.loadConfiguration = function () {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+function getWorkspaceConfig() {
+  const cfg = vscode.workspace.getConfiguration("xmlXpath");
+  const base = defaultConfig();
 
   return {
-    parentTag: cfg.get("parentTag", null),
-    mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
-    preferredAttributes: cfg.get("preferredAttributes", []),
-    ignoreTags: new Set(cfg.get("ignoreIndexTags", [])),
-    disableLeafIndex: cfg.get("disableLeafIndex", false),
-    skipSingleIndex: cfg.get("skipSingleIndex", false),
-    useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", false),
-    useParentScopedIndices: cfg.get("useParentScopedIndices", false),
-    ignoreParentSegment: cfg.get("ignoreParentSegment", false),
-    predicateTemplate: cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']"),
-    xlinkLabelPattern: cfg.get("xlinkLabelPattern", { type: "any", pattern: "" }),
-    forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
-    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", [])),
-    useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", false),
-    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", ""),
-    useRelativePath: cfg.get("useRelativePath", false),
-    includeNamespaces: cfg.get("includeNamespaces", false),
-    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false),
-    useSmartRelativePath: cfg.get("useSmartRelativePath", false),
-    smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", "d"),
-    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", []),
-    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", []),
-    smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", false),
-    smartRelativeSingleLine: cfg.get("smartRelativeSingleLine", false),
-    smartRelativeVirtualRoot: cfg.get("smartRelativeVirtualRoot", ""),
-    smartRelativeVirtualRootMode: cfg.get("smartRelativeVirtualRootMode", "include"),
-    smartRelativeAlwaysIncludeTags: cfg.get("smartRelativeAlwaysIncludeTags", []),
-    smartRelativeDontIgnoreAfter: cfg.get("smartRelativeDontIgnoreAfter", ""),
-    smartRelativeLandmarkMode: cfg.get("smartRelativeLandmarkMode", true),
+    parentTag: cfg.get("parentTag", base.parentTag),
+    mode: cfg.get("mode", base.mode),
+    preferredAttributes: cfg.get("preferredAttributes", base.preferredAttributes),
+    ignoreTags: cfg.get("ignoreIndexTags", base.ignoreTags),
+    disableLeafIndex: cfg.get("disableLeafIndex", base.disableLeafIndex),
+    skipSingleIndex: cfg.get("skipSingleIndex", base.skipSingleIndex),
+    useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", base.useXlinkLabelIndex),
+    useParentScopedIndices: cfg.get("useParentScopedIndices", base.useParentScopedIndices),
+    ignoreParentSegment: cfg.get("ignoreParentSegment", base.ignoreParentSegment),
+    predicateTemplate: cfg.get("predicateTemplate", base.predicateTemplate),
+    xlinkLabelPattern: cfg.get("xlinkLabelPattern", base.xlinkLabelPattern),
+    forceIndexOneFor: cfg.get("forceIndexOneFor", base.forceIndexOneFor),
+    exceptionsToIndexOneForcing: cfg.get("exceptionsToIndexOneForcing", base.exceptionsToIndexOneForcing),
+    useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", base.useAttributeBasedIndexing),
+    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", base.attributeBasedIndexingAttribute),
+    useRelativePath: cfg.get("useRelativePath", base.useRelativePath),
+    includeNamespaces: cfg.get("includeNamespaces", base.includeNamespaces),
+    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", base.includeDefaultNamespaces),
+
+    // smart-relative
+    useSmartRelativePath: cfg.get("useSmartRelativePath", base.useSmartRelativePath),
+    smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", base.smartRelativeNamespacePrefix),
+    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", base.smartRelativeSignificantAttributes),
+    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", base.smartRelativeIdentifyingChildren),
+    smartRelativeSingleLine: cfg.get("smartRelativeSingleLine", base.smartRelativeSingleLine),
+    smartRelativeVirtualRoot: cfg.get("smartRelativeVirtualRoot", base.smartRelativeVirtualRoot),
+    smartRelativeVirtualRootMode: cfg.get("smartRelativeVirtualRootMode", base.smartRelativeVirtualRootMode),
+    smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", base.smartRelativeIgnoreLastElement),
+    smartRelativeAlwaysIncludeTags: cfg.get("smartRelativeAlwaysIncludeTags", base.smartRelativeAlwaysIncludeTags),
+    smartRelativeDontIgnoreAfter: cfg.get("smartRelativeDontIgnoreAfter", base.smartRelativeDontIgnoreAfter),
+    smartRelativeLandmarkMode: cfg.get("smartRelativeLandmarkMode", base.smartRelativeLandmarkMode),
+    smartRelativeIndentSize: cfg.get("smartRelativeIndentSize", base.smartRelativeIndentSize),
+
+    // relative extras
+    relativeMustIncludeTags: cfg.get("relativeMustIncludeTags", base.relativeMustIncludeTags),
+    relativeMustIgnoreTags: cfg.get("relativeMustIgnoreTags", base.relativeMustIgnoreTags),
+    relativeDontIgnoreAfter: cfg.get("relativeDontIgnoreAfter", base.relativeDontIgnoreAfter),
+    relativeNamespacePrefix: cfg.get("relativeNamespacePrefix", base.relativeNamespacePrefix),
+
+    // notification toggle (not declared in package.json by default; add if you want it visible)
+    showNotifications: cfg.get("showNotifications", base.showNotifications)
   };
-};
-
-
-function activate(context) {
-  try {
-    console.log('XML XPath extension is activating...');
-
-    statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      100
-    );
-    statusBarItem.command = "xmlXpath.copyXPath";
-    context.subscriptions.push(statusBarItem);
-
-    registerCommands(context);
-
-    const debouncedUpdate = debounce(update, 150);
-    context.subscriptions.push(
-      vscode.window.onDidChangeTextEditorSelection(debouncedUpdate)
-    );
-    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(update));
-
-    update();
-
-    console.log('XML XPath extension activated successfully');
-  } catch (error) {
-    console.error('Error activating XML XPath extension:', error);
-    vscode.window.showErrorMessage(`Failed to activate XML XPath: ${error.message}`);
-  }
 }
 
-function registerCommands(context) {
-  const commands = {
-    "xmlXpath.setParent": setParentTag,
-    "xmlXpath.clearParent": clearParentTag,
-    "xmlXpath.setMode": setMode,
-    "xmlXpath.setPreferredAttributes": () =>
-      updateConfig(
-        "preferredAttributes",
-        "Preferred attributes (comma-separated)",
-        (val) =>
-          val
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-      ),
-    "xmlXpath.setIgnoreIndexTags": () =>
-      updateConfig(
-        "ignoreIndexTags",
-        "Tags to ignore index [1] (comma-separated)",
-        (val) =>
-          val
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-      ),
-    "xmlXpath.copyXPath": copyXPath,
-    "xmlXpath.copyUniversalXPath": copyUniversalXPath,
-    "xmlXpath.toggleDisableLeafIndex": () =>
-      toggleConfig("disableLeafIndex", "Disable Leaf Index"),
-    "xmlXpath.toggleSkipSingleIndex": () =>
-      toggleConfig("skipSingleIndex", "Skip Index [1]"),
-    "xmlXpath.toggleUseXlinkLabelIndex": () =>
-      toggleConfig("useXlinkLabelIndex", "Use xlink:label Index"),
-    "xmlXpath.toggleParentScopedIndexing": () =>
-      toggleConfig("useParentScopedIndices", "Parent-Scoped Indexing"),
-    "xmlXpath.toggleIgnoreParentSegment": () =>
-      toggleConfig("ignoreParentSegment", "Ignore Parent Segment"),
-    "xmlXpath.setTemplate": setPredicateTemplate,
-    "xmlXpath.setXlinkLabelPattern": setXlinkLabelPattern,
-    "xmlXpath.searchWithXPath": searchWithXPath,
-    "xmlXpath.setForceIndexOneFor": () =>
-      updateConfig(
-        "forceIndexOneFor",
-        "Tags to force index [1] (comma-separated, e.g., SECTION,PARAGRAPH)",
-        (val) =>
-          val
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-      ),
-    "xmlXpath.setExceptionsToIndexOneForcing": () =>
-      updateConfig(
-        "exceptionsToIndexOneForcing",
-        "Tags that are exceptions to force index [1] (comma-separated, e.g., SUB_SECTION)",
-        (val) =>
-          val
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-      ),
-    "xmlXpath.toggleAttributeBasedIndexing": () =>
-      toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
-    "xmlXpath.setAttributeBasedIndexingAttribute": setAttributeBasedIndexingAttribute,
-    "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
-    "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
-    "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
-    "xmlXpath.toggleUseSmartRelativePath": toggleUseSmartRelativePath,
-    "xmlXpath.setSmartRelativeNamespacePrefix": setSmartRelativeNamespacePrefix,
-    "xmlXpath.setSmartRelativeSignificantAttributes": setSmartRelativeSignificantAttributes,
-    "xmlXpath.toggleSmartRelativeIgnoreLastElement": toggleSmartRelativeIgnoreLastElement,
-    "xmlXpath.toggleSmartRelativeSingleLine": toggleSmartRelativeSingleLine,
-    "xmlXpath.setSmartRelativeVirtualRoot": setSmartRelativeVirtualRoot,
-    "xmlXpath.toggleSmartRelativeVirtualRootMode": toggleSmartRelativeVirtualRootMode,
-    "xmlXpath.clearSmartRelativeVirtualRoot": clearSmartRelativeVirtualRoot,
-    "xmlXpath.addAlwaysIncludeTagFromCursor": addAlwaysIncludeTagFromCursor,
-    "xmlXpath.clearAlwaysIncludeTags": clearAlwaysIncludeTagsCommand,
-    "xmlXpath.setDontIgnoreAfterFromCursor": setDontIgnoreAfterFromCursor,
-    "xmlXpath.clearDontIgnoreAfter": clearDontIgnoreAfterCommand,
-
-    // NEW commands to manage SmartRelative identifying children list
-    "xmlXpath.addIdentifyingChildFromCursor": addIdentifyingChildFromCursor,
-    "xmlXpath.removeIdentifyingChildFromCursor": removeIdentifyingChildFromCursor,
-    "xmlXpath.clearIdentifyingChildren": clearIdentifyingChildrenCommand,
-    "xmlXpath.listIdentifyingChildren": listIdentifyingChildrenCommand,
-    "xmlXpath.toggleSmartRelativeLandmarkMode": toggleSmartRelativeLandmarkMode,
-
-  };
-
-  for (const [name, handler] of Object.entries(commands)) {
-    context.subscriptions.push(vscode.commands.registerCommand(name, handler));
-  }
+function truncate(s, n = 160) {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-// Helper: get the tag name under the cursor (returns '' if none)
-async function getTagUnderCursor() {
+function notifyIfAllowed(message, options = {}) {
+  const cfg = getWorkspaceConfig();
+  if (!cfg.showNotifications) return;
+  // Use info by default; allow override with options.level = 'warn'|'error'
+  const level = options.level || "info";
+  if (level === "warn") vscode.window.showWarningMessage(message);
+  else if (level === "error") vscode.window.showErrorMessage(message);
+  else vscode.window.showInformationMessage(message);
+}
+
+// helper to build a short sample xpath for messages
+function sampleXPathSnippet() {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || !isXmlLanguage(editor.document)) return "";
+  if (!editor || editor.document.languageId !== "xml") return null;
+  try {
+    const cfg = getWorkspaceConfig();
+    const xpath = builder.buildXPathRegex(editor.document, editor.selection.active, cfg);
+    return xpath ? truncate(xpath, 240) : null;
+  } catch (e) {
+    // ignore errors in sample creation
+    return null;
+  }
+}
+
+// Generic setter + notification helper
+async function setConfigKey(key, value, showNotification = true) {
+  const cfg = vscode.workspace.getConfiguration("xmlXpath");
+  await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+  if (showNotification) {
+    const sample = sampleXPathSnippet();
+    const msg = `${key} set to ${JSON.stringify(value)}${sample ? " — sample XPath: " + sample : ""}`;
+    notifyIfAllowed(msg);
+  }
+}
+
+// toggle for boolean config keys (returns new value)
+async function toggleBoolConfig(key) {
+  const cfg = vscode.workspace.getConfiguration("xmlXpath");
+  const cur = cfg.get(key);
+  await cfg.update(key, !cur, vscode.ConfigurationTarget.Global);
+  const sample = sampleXPathSnippet();
+  const msg = `${key} toggled → ${!cur}${sample ? " — sample XPath: " + sample : ""}`;
+  notifyIfAllowed(msg);
+  return !cur;
+}
+
+// helpers to reduce repeated registration code
+function registerToggle(context, commandId, configKey) {
+  context.subscriptions.push(vscode.commands.registerCommand(commandId, async () => {
+    await toggleBoolConfig(configKey);
+    updateStatusBar(vscode.window.activeTextEditor);
+  }));
+}
+
+function registerInputCommand(context, commandId, configKey, prompt, hint = "") {
+  context.subscriptions.push(vscode.commands.registerCommand(commandId, async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get(configKey) || [];
+    const defaultText = Array.isArray(cur) ? cur.join(",") : cur;
+    const val = await vscode.window.showInputBox({ prompt, value: defaultText, placeHolder: hint });
+    if (val == null) return;
+    const out = Array.isArray(cur) ? val.split(",").map(s => s.trim()).filter(Boolean) : val || "";
+    await setConfigKey(configKey, out);
+    updateStatusBar(vscode.window.activeTextEditor);
+  }));
+}
+
+function registerSimpleCommand(context, commandId, handler) {
+  context.subscriptions.push(vscode.commands.registerCommand(commandId, handler));
+}
+
+// status bar update logic
+async function updateStatusBar(editor) {
+  if (!statusBarItem) return;
+  if (!editor || !editor.document || editor.document.languageId !== "xml") {
+    try { statusBarItem.hide(); } catch (e) { /* ignore */ }
+    return;
+  }
 
   try {
-    const xml = editor.document.getText();
-    const offset = editor.document.offsetAt(editor.selection.active);
-    const config = xpathBuilder.loadConfiguration();
-    const events = xpathBuilder.tokenizeXML(xml, config);
-    if (!events) return "";
-
-    const stackResult = xpathBuilder.buildElementStack(events, offset, config);
-    if (stackResult && stackResult.stack.length > 0) {
-      // return the current element's tag name (closest)
-      return stackResult.stack[stackResult.stack.length - 1].tag || "";
+    const config = getWorkspaceConfig();
+    const xpath = builder.buildXPathRegex(editor.document, editor.selection.active, config);
+    if (xpath) {
+      const shortText = xpath.length > 80 ? xpath.slice(0, 70) + "…" : xpath;
+      statusBarItem.text = `$(search) XPath: ${shortText}`;
+      statusBarItem.tooltip = `${truncate(xpath, 1000)}\n\n(click to copy full XPath to clipboard)`;
+      statusBarItem.command = "xmlXpath.copyXPath";
+      statusBarItem.show();
+    } else {
+      statusBarItem.text = `$(search) XPath: —`;
+      statusBarItem.tooltip = "No XPath available at cursor position";
+      statusBarItem.command = undefined;
+      statusBarItem.show();
     }
   } catch (e) {
-    console.error("Error in getTagUnderCursor:", e);
+    console.error("Error updating status bar:", e);
+    statusBarItem.text = `$(search) XPath: error`;
+    statusBarItem.tooltip = "Error generating XPath (see console).";
+    statusBarItem.show();
   }
-  return "";
 }
 
-function getWordAtCursor() {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) return "";
-  const doc = editor.document;
+// get a tag-name token under cursor (used by several commands)
+function getTagNameUnderCursor(editor) {
+  if (!editor) return null;
   const pos = editor.selection.active;
-
-  const range = doc.getWordRangeAtPosition(pos, /[A-Za-z0-9_:.\-]+/);
-  if (range) {
-    return doc.getText(range);
-  }
-
-  // fallback: try to look left/right one token by reading the line
-  const line = doc.lineAt(pos.line).text;
-  const idx = pos.character;
-  // regex to capture a token around idx
-  const tokenRegex = /[A-Za-z0-9_:.\-]+/g;
-  let match;
-  while ((match = tokenRegex.exec(line))) {
-    const s = match.index;
-    const e = s + match[0].length;
-    if (idx >= s && idx <= e) {
-      return match[0];
-    }
-  }
-  return "";
+  const doc = editor.document;
+  const wordRange = doc.getWordRangeAtPosition(pos, /[A-Za-z0-9\-_:.]+/);
+  if (!wordRange) return null;
+  return doc.getText(wordRange);
 }
 
-// Command: add tag under cursor (or ask) to smartRelativeAlwaysIncludeTags and persist
-async function addAlwaysIncludeTagFromCursor() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeAlwaysIncludeTags", []);
-  let tag = await getTagUnderCursor();
-
-  // If nothing sensible found, prompt user
-  if (!tag) {
-    tag = await vscode.window.showInputBox({
-      prompt: "Tag to always include in Smart Relative mode",
-      placeHolder: "e.g., a, link, item",
-      validateInput: (v) => {
-        if (!v) return "Tag cannot be empty";
-        if (!/^[A-Za-z_][A-Za-z0-9_:\\-\\.]*$/.test(v)) return "Invalid XML tag name";
-        return null;
-      },
-    });
-    if (!tag) return;
-  } else {
-    // confirm quick-add
-    const confirm = await vscode.window.showQuickPick(["Yes", "No"], {
-      placeHolder: `Add '${tag}' to Smart Relative always-include list?`
-    });
-    if (confirm !== "Yes") return;
-  }
-
-  tag = tag.trim();
-  const updated = Array.isArray(current) ? [...current] : [];
-  if (!updated.includes(tag)) {
-    updated.push(tag);
-    await cfg.update("smartRelativeAlwaysIncludeTags", updated, vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage(`Added '${tag}' to Smart Relative always-include list`);
-    update();
-  } else {
-    vscode.window.showInformationMessage(`'${tag}' is already in the always-include list`);
-  }
-}
-
-async function addIdentifyingChildFromCursor() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeIdentifyingChildren", []);
-  let tag = getWordAtCursor();
-
-  if (!tag) {
-    tag = await vscode.window.showInputBox({
-      prompt: "Child element name to treat as identifying (e.g. ImageCategoryType)",
-      placeHolder: "ImageCategoryType",
-      validateInput: (v) => {
-        if (!v) return "Name cannot be empty";
-        if (!/^[A-Za-z_][A-Za-z0-9_:\-\.]*$/.test(v)) return "Invalid XML element name";
-        return null;
-      },
-    });
-    if (!tag) return;
-  } else {
-    // quick confirmation
-    const confirm = await vscode.window.showQuickPick(["Yes", "No"], {
-      placeHolder: `Add '${tag}' to Smart Relative identifying-children list?`
-    });
-    if (confirm !== "Yes") return;
-  }
-
-  tag = tag.trim();
-  const updated = Array.isArray(current) ? [...current] : [];
-  if (!updated.includes(tag)) {
-    updated.push(tag);
-    await cfg.update("smartRelativeIdentifyingChildren", updated, vscode.ConfigurationTarget.Global);
-    vscode.window.showInformationMessage(`Added '${tag}' to smartRelativeIdentifyingChildren`);
-    update();
-  } else {
-    vscode.window.showInformationMessage(`'${tag}' is already in smartRelativeIdentifyingChildren`);
-  }
-}
-
-async function clearIdentifyingChildrenCommand() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("smartRelativeIdentifyingChildren", [], vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage("smartRelativeIdentifyingChildren cleared");
-  update();
-}
-
-// Command: list identifying children (quick pick display)
-async function listIdentifyingChildrenCommand() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeIdentifyingChildren", []);
-  if (!Array.isArray(current) || current.length === 0) {
-    vscode.window.showInformationMessage("smartRelativeIdentifyingChildren is empty");
+// copy xpath
+async function copyXPathToClipboard(editor, opts = {}) {
+  if (!editor) {
+    notifyIfAllowed("No active XML editor", { level: "warn" });
     return;
   }
-  await vscode.window.showQuickPick(current, { placeHolder: "Smart Relative identifying children" });
+  const config = getWorkspaceConfig();
+  const merged = Object.assign({}, config, opts || {});
+  const xpath = builder.buildXPathRegex(editor.document, editor.selection.active, merged);
+  if (!xpath) {
+    notifyIfAllowed("Could not generate XPath at cursor", { level: "warn" });
+    return;
+  }
+  await vscode.env.clipboard.writeText(xpath);
+  // richer notification: show full => truncated sample + confirm
+  const sample = truncate(xpath, 240);
+  notifyIfAllowed(`XPath copied to clipboard: ${sample}`);
 }
 
-// Command: clear always-include list
-async function clearAlwaysIncludeTagsCommand() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("smartRelativeAlwaysIncludeTags", [], vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage("Smart Relative always-include list cleared");
-  update();
+// copy universal xpath (keeps behavior)
+async function copyUniversalXPath(editor) {
+  const opts = { useRelativePath: true, includeNamespaces: false };
+  await copyXPathToClipboard(editor, opts);
 }
 
-async function removeIdentifyingChildFromCursor() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeIdentifyingChildren", []);
-  let tag = getWordAtCursor();
+// search with xpath (keeps behavior)
+async function searchWithXPath(editor) {
+  if (!editor) {
+    notifyIfAllowed("No active XML editor", { level: "warn" });
+    return;
+  }
+  const config = getWorkspaceConfig();
+  const xpath = builder.buildXPathRegex(editor.document, editor.selection.active, config);
+  if (!xpath) {
+    notifyIfAllowed("Could not generate XPath at cursor", { level: "warn" });
+    return;
+  }
+  // Run find in files with the xpath string
+  await vscode.commands.executeCommand("workbench.action.findInFiles", {
+    query: xpath,
+    triggerSearch: true,
+    isRegex: false
+  });
+}
 
-  if (!tag) {
-    // present quick pick to remove from list
-    if (!Array.isArray(current) || current.length === 0) {
-      vscode.window.showInformationMessage("smartRelativeIdentifyingChildren is empty");
+// activate / deactivate
+function activate(context) {
+  builder = new XPathBuilder();
+
+  // single status bar item
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBarItem.command = "xmlXpath.copyXPath";
+  context.subscriptions.push(statusBarItem);
+
+  // keep status updated
+  context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((e) => updateStatusBar(e)));
+  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((e) => updateStatusBar(e.textEditor)));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration("xmlXpath")) updateStatusBar(vscode.window.activeTextEditor);
+  }));
+
+  // core commands
+  registerSimpleCommand(context, "xmlXpath.copyXPath", async () => copyXPathToClipboard(vscode.window.activeTextEditor));
+  registerSimpleCommand(context, "xmlXpath.copyUniversalXPath", async () => copyUniversalXPath(vscode.window.activeTextEditor));
+  registerSimpleCommand(context, "xmlXpath.searchWithXPath", async () => searchWithXPath(vscode.window.activeTextEditor));
+
+  // parent tag commands
+  registerSimpleCommand(context, "xmlXpath.setParent", async () => {
+    const val = await vscode.window.showInputBox({ prompt: "Parent tag (leave empty to clear)" });
+    await setConfigKey("parentTag", val || null);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+  registerSimpleCommand(context, "xmlXpath.clearParent", async () => {
+    await setConfigKey("parentTag", null);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  // mode
+  registerSimpleCommand(context, "xmlXpath.setMode", async () => {
+    const picked = await vscode.window.showQuickPick(
+      ["includeIndices: true, includeAttributes: true", "indices only", "attributes only", "none"],
+      { placeHolder: "Select XPath generation mode" }
+    );
+    if (!picked) return;
+    let mode;
+    switch (picked) {
+      case "indices only": mode = { includeIndices: true, includeAttributes: false }; break;
+      case "attributes only": mode = { includeIndices: false, includeAttributes: true }; break;
+      case "none": mode = { includeIndices: false, includeAttributes: false }; break;
+      default: mode = { includeIndices: true, includeAttributes: true };
+    }
+    await setConfigKey("mode", mode);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  // preferred attributes
+  registerSimpleCommand(context, "xmlXpath.setPreferredAttributes", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("preferredAttributes") || [];
+    const val = await vscode.window.showInputBox({ prompt: "Preferred attributes (comma-separated)", value: cur.join(",") });
+    if (val == null) return;
+    const arr = val.split(",").map(s => s.trim()).filter(Boolean);
+    await setConfigKey("preferredAttributes", arr);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  // boolean toggles (use helper to register)
+  const toggles = [
+    { cmd: "xmlXpath.toggleDisableLeafIndex", key: "disableLeafIndex" },
+    { cmd: "xmlXpath.toggleSkipSingleIndex", key: "skipSingleIndex" },
+    { cmd: "xmlXpath.toggleUseXlinkLabelIndex", key: "useXlinkLabelIndex" },
+    { cmd: "xmlXpath.toggleParentScopedIndexing", key: "useParentScopedIndices" },
+    { cmd: "xmlXpath.toggleIgnoreParentSegment", key: "ignoreParentSegment" },
+    { cmd: "xmlXpath.toggleUseRelativePath", key: "useRelativePath" },
+    { cmd: "xmlXpath.toggleIncludeNamespaces", key: "includeNamespaces" },
+    { cmd: "xmlXpath.toggleIncludeDefaultNamespaces", key: "includeDefaultNamespaces" },
+    { cmd: "xmlXpath.toggleUseSmartRelativePath", key: "useSmartRelativePath" },
+    { cmd: "xmlXpath.toggleSmartRelativeLandmarkMode", key: "smartRelativeLandmarkMode" },
+    { cmd: "xmlXpath.toggleSmartRelativeIgnoreLastElement", key: "smartRelativeIgnoreLastElement" },
+    { cmd: "xmlXpath.toggleSmartRelativeSingleLine", key: "smartRelativeSingleLine" },
+    { cmd: "xmlXpath.toggleAttributeBasedIndexing", key: "useAttributeBasedIndexing" }
+  ];
+  toggles.forEach(t => registerToggle(context, t.cmd, t.key));
+
+  // more commands (xlink pattern, predicate template, force [1], etc.)
+  registerSimpleCommand(context, "xmlXpath.setXlinkLabelPattern", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("xlinkLabelPattern") || { type: "any", pattern: "" };
+    const type = await vscode.window.showQuickPick(["any", "startsWith", "contains", "endsWith", "exactPrefix", "regex"], { placeHolder: "Select xlinkLabel pattern type", canPickMany: false });
+    if (!type) return;
+    const pattern = await vscode.window.showInputBox({ prompt: "Pattern (leave empty for default)", value: cur.pattern || "" });
+    if (pattern == null) return;
+    await setConfigKey("xlinkLabelPattern", { type, pattern });
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setTemplate", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("predicateTemplate") || "[@{attr1}='{attr1V}']";
+    const val = await vscode.window.showInputBox({ prompt: "Predicate template", value: cur });
+    if (val == null) return;
+    await setConfigKey("predicateTemplate", val);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setForceIndexOneFor", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("forceIndexOneFor") || [];
+    const val = await vscode.window.showInputBox({ prompt: "Tags to force [1] (comma-separated)", value: cur.join(",") });
+    if (val == null) return;
+    const arr = val.split(",").map(s => s.trim()).filter(Boolean);
+    await setConfigKey("forceIndexOneFor", arr);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setExceptionsToIndexOneForcing", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("exceptionsToIndexOneForcing") || [];
+    const val = await vscode.window.showInputBox({ prompt: "Tags to exclude from forcing [1] (comma-separated)", value: cur.join(",") });
+    if (val == null) return;
+    const arr = val.split(",").map(s => s.trim()).filter(Boolean);
+    await setConfigKey("exceptionsToIndexOneForcing", arr);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setAttributeBasedIndexingAttribute", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("attributeBasedIndexingAttribute") || "";
+    const val = await vscode.window.showInputBox({ prompt: "Attribute name to use for attribute-based indexing (leave empty to use preferred attributes)", value: cur });
+    if (val == null) return;
+    await setConfigKey("attributeBasedIndexingAttribute", val);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setSmartRelativeNamespacePrefix", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("smartRelativeNamespacePrefix") || "d";
+    const val = await vscode.window.showInputBox({ prompt: "Smart relative namespace prefix", value: cur });
+    if (val == null) return;
+    await setConfigKey("smartRelativeNamespacePrefix", val);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setSmartRelativeSignificantAttributes", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("smartRelativeSignificantAttributes") || [];
+    const val = await vscode.window.showInputBox({ prompt: "Significant attributes (comma-separated)", value: cur.join(",") });
+    if (val == null) return;
+    const arr = val.split(",").map(s => s.trim()).filter(Boolean);
+    await setConfigKey("smartRelativeSignificantAttributes", arr);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.setSmartRelativeVirtualRoot", async () => {
+    const cur = vscode.workspace.getConfiguration("xmlXpath").get("smartRelativeVirtualRoot") || "";
+    const val = await vscode.window.showInputBox({ prompt: "Smart relative virtual root tag (leave empty to clear)", value: cur });
+    if (val == null) return;
+    await setConfigKey("smartRelativeVirtualRoot", val);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.clearSmartRelativeVirtualRoot", async () => {
+    await setConfigKey("smartRelativeVirtualRoot", "");
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  registerSimpleCommand(context, "xmlXpath.toggleSmartRelativeVirtualRootMode", async () => {
+    const cfg = vscode.workspace.getConfiguration("xmlXpath");
+    const cur = cfg.get("smartRelativeVirtualRootMode") || "include";
+    const next = cur === "include" ? "exclude" : "include";
+    await cfg.update("smartRelativeVirtualRootMode", next, vscode.ConfigurationTarget.Global);
+    notifyIfAllowed(`smartRelativeVirtualRootMode set to ${next}`);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
+
+  // addAlwaysIncludeTagFromCursor
+  registerSimpleCommand(context, "xmlXpath.addAlwaysIncludeTagFromCursor", async () => {
+    const editor = vscode.window.activeTextEditor;
+    const tag = getTagNameUnderCursor(editor);
+    if (!tag) {
+      notifyIfAllowed("No tag under cursor", { level: "warn" });
       return;
     }
-    const pick = await vscode.window.showQuickPick(current, {
-      placeHolder: "Choose identifying child to remove"
-    });
-    if (!pick) return;
-    tag = pick;
-  } else {
-    const confirm = await vscode.window.showQuickPick(["Yes", "No"], {
-      placeHolder: `Remove '${tag}' from Smart Relative identifying-children list?`
-    });
-    if (confirm !== "Yes") return;
-  }
-
-  const updated = Array.isArray(current) ? current.filter((c) => c !== tag) : [];
-  await cfg.update("smartRelativeIdentifyingChildren", updated, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Removed '${tag}' from smartRelativeIdentifyingChildren`);
-  update();
-}
-
-async function setDontIgnoreAfterFromCursor() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeDontIgnoreAfter", "");
-  let tag = await getTagUnderCursor();
-
-  if (!tag) {
-    tag = await vscode.window.showInputBox({
-      prompt: "Do not ignore any tag after this element (anchor). Enter tag name",
-      placeHolder: "e.g., SECTION, ITEM, PROPERTY",
-      value: current || "",
-      validateInput: (v) => {
-        if (!v) return "Tag cannot be empty";
-        if (!/^[A-Za-z_][A-Za-z0-9_:\\-\\.]*$/.test(v)) return "Invalid XML tag name";
-        return null;
-      },
-    });
-    if (!tag) return;
-  } else {
-    const confirm = await vscode.window.showQuickPick(["Yes","No"], {
-      placeHolder: `Set 'don't ignore any tag after' anchor to '${tag}'?`
-    });
-    if (confirm !== "Yes") return;
-  }
-
-  tag = tag.trim();
-  await cfg.update("smartRelativeDontIgnoreAfter", tag, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Smart Relative: will not ignore tags after '${tag}'`);
-  update();
-}
-
-
-// Command: clear dont-ignore-after anchor
-async function clearDontIgnoreAfterCommand() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("smartRelativeDontIgnoreAfter", "", vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage("Smart Relative 'dont-ignore-after' anchor cleared");
-  update();
-}
-
-// Add the command functions:
-async function setSmartRelativeVirtualRoot() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeVirtualRoot", "");
-
-  // Get current element under cursor as suggestion
-  let tagUnderCursor = "";
-  const editor = vscode.window.activeTextEditor;
-  if (editor && isXmlLanguage(editor.document)) {
-    try {
-      const xml = editor.document.getText();
-      const offset = editor.document.offsetAt(editor.selection.active);
-      const config = xpathBuilder.loadConfiguration();
-      const events = xpathBuilder.tokenizeXML(xml, config);
-      if (events) {
-        const stackResult = xpathBuilder.buildElementStack(events, offset, config);
-        if (stackResult && stackResult.stack.length > 0) {
-          // Suggest a parent element as virtual root
-          if (stackResult.stack.length > 1) {
-            tagUnderCursor = stackResult.stack[stackResult.stack.length - 2].tag;
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error getting tag under cursor:", error);
-    }
-  }
-
-  const value = await vscode.window.showInputBox({
-    prompt: "Virtual root element for smart relative XPath",
-    value: tagUnderCursor || current,
-    placeHolder: "e.g., PROPERTY, VALUATION, DOCUMENT, SERVICE",
-    validateInput: (value) => {
-      if (value && !/^[a-zA-Z][a-zA-Z0-9_\-:.]*$/.test(value)) {
-        return "Must be a valid XML element name";
-      }
-      return null;
-    }
-  });
-
-  if (value !== undefined) {
-    await cfg.update("smartRelativeVirtualRoot", value.trim(), vscode.ConfigurationTarget.Global);
-    update();
-
-    if (value.trim()) {
-      vscode.window.showInformationMessage(`Virtual root set to: ${value.trim()}`);
+    const cfg = vscode.workspace.getConfiguration("xmlXpath");
+    const arr = cfg.get("smartRelativeAlwaysIncludeTags") || [];
+    if (!arr.includes(tag)) {
+      arr.push(tag);
+      await cfg.update("smartRelativeAlwaysIncludeTags", arr, vscode.ConfigurationTarget.Global);
+      notifyIfAllowed(`Added ${tag} to smartRelativeAlwaysIncludeTags — sample XPath: ${truncate(sampleXPathSnippet() || "", 200)}`);
+      updateStatusBar(vscode.window.activeTextEditor);
     } else {
-      vscode.window.showInformationMessage("Virtual root cleared - using document root");
-    }
-  }
-}
-
-async function toggleSmartRelativeVirtualRootMode() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeVirtualRootMode", "include");
-  const newMode = current === "include" ? "exclude" : "include";
-
-  await cfg.update("smartRelativeVirtualRootMode", newMode, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(
-    `Virtual Root Mode: ${newMode.toUpperCase()}`
-  );
-  update();
-}
-
-async function clearSmartRelativeVirtualRoot() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("smartRelativeVirtualRoot", "", vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage("Virtual root cleared");
-  update();
-}
-
-// Add the toggle functions:
-async function toggleSmartRelativeSingleLine() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeSingleLine", false);
-  await cfg.update("smartRelativeSingleLine", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Smart Relative Single Line: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-async function toggleSmartRelativeIgnoreLastElement() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeIgnoreLastElement", false);
-  await cfg.update("smartRelativeIgnoreLastElement", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Smart Relative Ignore Last Element: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-// NEW: Toggle landmark mode for smart relative
-async function toggleSmartRelativeLandmarkMode() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeLandmarkMode", true);
-  await cfg.update("smartRelativeLandmarkMode", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Smart Relative Landmark Mode: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-// NEW: Toggle smart relative path
-async function toggleUseSmartRelativePath() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("useSmartRelativePath", false);
-  await cfg.update("useSmartRelativePath", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Smart Relative Path: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-// NEW: Set smart relative namespace prefix
-async function setSmartRelativeNamespacePrefix() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeNamespacePrefix", "d");
-
-  const value = await vscode.window.showInputBox({
-    prompt: "Namespace prefix for smart relative XPath",
-    value: current,
-    placeHolder: "e.g., d, ns, app",
-    validateInput: (value) => {
-      if (!value) return "Prefix cannot be empty";
-      if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(value)) {
-        return "Prefix must be a valid XML namespace prefix";
-      }
-      return null;
+      notifyIfAllowed(`${tag} already present in smartRelativeAlwaysIncludeTags`);
     }
   });
 
-  if (value) {
-    await cfg.update("smartRelativeNamespacePrefix", value, vscode.ConfigurationTarget.Global);
-    update();
-    vscode.window.showInformationMessage(`Smart relative prefix set to: ${value}`);
-  }
-}
-
-async function setSmartRelativeSignificantAttributes() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeSignificantAttributes", ["ValuationUseType", "id", "type", "name"]);
-
-  const value = await vscode.window.showInputBox({
-    prompt: "Significant attributes for smart relative XPath (comma-separated)",
-    value: Array.isArray(current) ? current.join(", ") : String(current),
-    placeHolder: "ValuationUseType, id, type, name"
+  registerSimpleCommand(context, "xmlXpath.clearAlwaysIncludeTags", async () => {
+    await setConfigKey("smartRelativeAlwaysIncludeTags", []);
+    updateStatusBar(vscode.window.activeTextEditor);
   });
 
-  if (value !== undefined) {
-    const attributes = value.split(",").map(s => s.trim()).filter(Boolean);
-    await cfg.update("smartRelativeSignificantAttributes", attributes, vscode.ConfigurationTarget.Global);
-    update();
-    vscode.window.showInformationMessage(`Significant attributes set to: ${attributes.join(", ")}`);
-  }
-}
-
-// NEW: Toggle relative path
-async function toggleUseRelativePath() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("useRelativePath", false);
-  await cfg.update("useRelativePath", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Use Relative Path: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-// NEW: Toggle include namespaces
-async function toggleIncludeNamespaces() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("includeNamespaces", false);
-  await cfg.update("includeNamespaces", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Include Namespaces: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-// NEW: Toggle include default namespaces
-async function toggleIncludeDefaultNamespaces() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("includeDefaultNamespaces", false);
-  await cfg.update("includeDefaultNamespaces", !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Include Default Namespaces: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-async function setAttributeBasedIndexingAttribute() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("attributeBasedIndexingAttribute", "");
-  const preferredAttrs = cfg.get("preferredAttributes", []);
-
-  // Provide quick pick with preferred attributes
-  const items = preferredAttrs.map((attr) => ({
-    label: attr,
-    description: "Preferred attribute",
-  }));
-  items.push({
-    label: "Custom...",
-    description: "Enter custom attribute name",
+  registerSimpleCommand(context, "xmlXpath.setDontIgnoreAfterFromCursor", async () => {
+    const editor = vscode.window.activeTextEditor;
+    const tag = getTagNameUnderCursor(editor);
+    if (!tag) {
+      notifyIfAllowed("No tag under cursor", { level: "warn" });
+      return;
+    }
+    await setConfigKey("smartRelativeDontIgnoreAfter", tag);
+    updateStatusBar(vscode.window.activeTextEditor);
   });
 
-  const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: "Select attribute for indexing",
+  registerSimpleCommand(context, "xmlXpath.clearDontIgnoreAfter", async () => {
+    await setConfigKey("smartRelativeDontIgnoreAfter", "");
+    updateStatusBar(vscode.window.activeTextEditor);
   });
 
-  if (!pick) return;
+  // relative-mode setter commands (cleaned)
+  registerInputCommand(context, "xmlXpath.setRelativeMustIncludeTags", "relativeMustIncludeTags", "Relative must-include tags (comma-separated)", "e.g. PROPERTY,VALUATION");
+  registerInputCommand(context, "xmlXpath.setRelativeMustIgnoreTags", "relativeMustIgnoreTags", "Relative must-ignore tags (comma-separated)", "e.g. IMAGE,NOTE");
 
-  let value = pick.label;
-  if (value === "Custom...") {
-    value = await vscode.window.showInputBox({
-      prompt: "Attribute name for attribute-based indexing",
-      value: current,
-      placeHolder: "e.g., ValuationType, type, name",
-    });
-  }
+  registerSimpleCommand(context, "xmlXpath.setRelativeDontIgnoreAfter", async () => {
+    const editor = vscode.window.activeTextEditor;
+    const tag = getTagNameUnderCursor(editor);
+    if (tag) {
+      await setConfigKey("relativeDontIgnoreAfter", tag);
+      updateStatusBar(vscode.window.activeTextEditor);
+      return;
+    }
+    const val = await vscode.window.showInputBox({ prompt: "Relative dontIgnoreAfter anchor tag (leave empty to clear)", value: vscode.workspace.getConfiguration("xmlXpath").get("relativeDontIgnoreAfter") || "" });
+    if (val == null) return;
+    await setConfigKey("relativeDontIgnoreAfter", val);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
 
-  if (value) {
-    await cfg.update(
-      "attributeBasedIndexingAttribute",
-      value,
-      vscode.ConfigurationTarget.Global
-    );
-    update();
-    vscode.window.showInformationMessage(`Attribute-based indexing will use: ${value}`);
-  }
-}
+  registerSimpleCommand(context, "xmlXpath.clearRelativeDontIgnoreAfter", async () => {
+    await setConfigKey("relativeDontIgnoreAfter", "");
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
 
-// Function to find element by XPath
-async function findElementByXPath(editor, xpath) {
-  const xml = editor.document.getText();
-  const config = xpathBuilder.loadConfiguration();
-
-  // Parse the XPath into segments
-  const segments = parseXPath(xpath);
-  if (!segments || segments.length === 0) {
-    throw new Error("Invalid XPath format");
-  }
-
-  // Tokenize the XML with configuration
-  const events = xpathBuilder.tokenizeXML(xml, config);
-  if (!events) {
-    throw new Error("Failed to parse XML");
-  }
-
-  // Search for matching element with configuration
-  return searchForElement(events, segments, xml, config);
-}
-
-const REGEX_PATTERNS = {
-  predicate: /\[([^\]]+)\]/g,
-  position: /^\d+$/,
-  attribute: /^@?([^=\s]+)\s*=\s*['"]([^'"]*)['"]/,
-  contains: new RegExp(
-    `contains\\s*\\(\\s*@([^,)]+)\\s*,\\s*['"]([^'"]+)['"]\\s*\\)`.replace(
-      /\s+|#.*/g,
-      ""
-    ),
-    ""
-  ),
-  endOfLine: new RegExp(`test$`),
-  dollarAmount: new RegExp(`\\$(\\d+)`.replace(/\s+|#.*/g, "")),
-  text: /text\(\)\s*=\s*['"]([^'"]+)['"]/,
-  positionFunc: /position\(\)\s*=\s*(\d+)/,
-};
-
-function parseXPath(xpath) {
-  // Remove leading slash and split by /
-  if (!xpath || !xpath.startsWith("/")) return [];
-  const parts = xpath.substring(1).split("/");
-  const segments = [];
-
-  for (const part of parts) {
-    const bracketIndex = part.indexOf("[");
-    let tagName, predicatesPart;
-    if (bracketIndex === -1) {
-      tagName = part;
-      predicatesPart = "";
+  // identifying children commands (cleaned)
+  registerSimpleCommand(context, "xmlXpath.addIdentifyingChildFromCursor", async () => {
+    const editor = vscode.window.activeTextEditor;
+    const tag = getTagNameUnderCursor(editor);
+    if (!tag) { notifyIfAllowed("No tag under cursor", { level: "warn" }); return; }
+    const cfg = vscode.workspace.getConfiguration("xmlXpath");
+    const arr = cfg.get("smartRelativeIdentifyingChildren");
+    if (!Array.isArray(arr)) {
+      await cfg.update("smartRelativeIdentifyingChildren", [tag], vscode.ConfigurationTarget.Global);
+      notifyIfAllowed(`smartRelativeIdentifyingChildren initialized with ${tag}`);
+      updateStatusBar(vscode.window.activeTextEditor);
+      return;
+    }
+    if (!arr.includes(tag)) {
+      arr.push(tag);
+      await cfg.update("smartRelativeIdentifyingChildren", arr, vscode.ConfigurationTarget.Global);
+      notifyIfAllowed(`Added ${tag} to smartRelativeIdentifyingChildren`);
+      updateStatusBar(vscode.window.activeTextEditor);
     } else {
-      tagName = part.substring(0, bracketIndex);
-      predicatesPart = part.substring(bracketIndex);
+      notifyIfAllowed(`${tag} already present in smartRelativeIdentifyingChildren`);
     }
+  });
 
-    const segment = { tagName, predicates: [] };
+  registerSimpleCommand(context, "xmlXpath.removeIdentifyingChildFromCursor", async () => {
+    const editor = vscode.window.activeTextEditor;
+    const tag = getTagNameUnderCursor(editor);
+    if (!tag) { notifyIfAllowed("No tag under cursor", { level: "warn" }); return; }
+    const cfg = vscode.workspace.getConfiguration("xmlXpath");
+    let arr = cfg.get("smartRelativeIdentifyingChildren");
+    if (!Array.isArray(arr) || arr.length === 0) { notifyIfAllowed("No identifying children configured"); return; }
+    arr = arr.filter(t => t !== tag);
+    await cfg.update("smartRelativeIdentifyingChildren", arr, vscode.ConfigurationTarget.Global);
+    notifyIfAllowed(`Removed ${tag} from smartRelativeIdentifyingChildren`);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
 
-    if (predicatesPart) {
-      const predicateRegex = /\[([^\]]+)\]/g;
-      let predicateMatch;
-      while ((predicateMatch = predicateRegex.exec(predicatesPart)) !== null) {
-        const predContent = predicateMatch[1].trim();
+  registerSimpleCommand(context, "xmlXpath.clearIdentifyingChildren", async () => {
+    await setConfigKey("smartRelativeIdentifyingChildren", []);
+    updateStatusBar(vscode.window.activeTextEditor);
+  });
 
-        if (/^\d+$/.test(predContent)) {
-          segment.predicates.push({
-            type: "position",
-            value: parseInt(predContent, 10),
-          });
-        } else if (predContent.includes("=")) {
-          const attrMatch = predContent.match(/^@?([^=\s]+)\s*=\s*['"]([^'"]*)['"]/);
-          if (attrMatch) {
-            segment.predicates.push({
-              type: "attribute",
-              name: attrMatch[1],
-              value: attrMatch[2],
-            });
-          } else {
-            segment.predicates.push({ type: "other", value: predContent });
-          }
-        } else if (predContent.startsWith("contains")) {
-          const containsMatch = predContent.match(/contains\s*\(\s*@([^,)]+),\s*['"]([^'"]+)['"]\s*\)/);
-          if (containsMatch) {
-            segment.predicates.push({
-              type: "contains",
-              target: containsMatch[1],
-              value: containsMatch[2],
-            });
-          } else {
-            segment.predicates.push({ type: "other", value: predContent });
-          }
-        } else if (predContent.startsWith("text()")) {
-          const textMatch = predContent.match(/text\(\)\s*=\s*['"]([^'"]+)['"]/);
-          if (textMatch) {
-            segment.predicates.push({ type: "text", value: textMatch[1] });
-          } else {
-            segment.predicates.push({ type: "other", value: predContent });
-          }
-        } else if (predContent.startsWith("position()")) {
-          const posMatch = predContent.match(/position\(\)\s*=\s*(\d+)/);
-          if (posMatch) {
-            segment.predicates.push({ type: "position", value: parseInt(posMatch[1], 10) });
-          } else {
-            segment.predicates.push({ type: "other", value: predContent });
-          }
-        } else if (predContent === "last()") {
-          segment.predicates.push({ type: "last" });
-        } else {
-          segment.predicates.push({ type: "other", value: predContent });
-        }
-      }
-    }
-
-    segments.push(segment);
-  }
-
-  return segments;
-}
-
-async function searchWithXPath() {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || !isXmlLanguage(editor.document)) {
-    vscode.window.showWarningMessage("Please open an XML file to search.");
-    return;
-  }
-
-  // Get XPath from clipboard or prompt
-  let xpath = await vscode.env.clipboard.readText();
-
-  // If clipboard doesn't contain a potential XPath, prompt user
-  if (!xpath || !xpath.startsWith("/")) {
-    xpath = await vscode.window.showInputBox({
-      prompt: "Enter XPath to search",
-      placeHolder: "/root/element[@id='example']",
-      value: xpath || "",
-      validateInput: (value) => {
-        if (!value) return "XPath cannot be empty";
-        if (!value.startsWith("/")) return "XPath must start with /";
-        return null;
-      },
-    });
-
-    if (!xpath) return;
-  }
-
-  try {
-    const result = await findElementByXPath(editor, xpath);
-
-    if (result) {
-      // Move cursor to the found element
-      const position = editor.document.positionAt(result.startOffset);
-      const endPosition = editor.document.positionAt(result.endOffset);
-
-      // Select the element range
-      editor.selection = new vscode.Selection(position, endPosition);
-      editor.revealRange(
-        new vscode.Range(position, endPosition),
-        vscode.TextEditorRevealType.InCenter
-      );
-
-      // Show appropriate message based on whether it's a full or partial match
-      if (result.isPartial) {
-        // Build partial matched path string for display
-        const segments = parseXPath(xpath);
-        const matchedPath = segments
-          .slice(0, result.matchedDepth)
-          .map((seg) => {
-            let path = seg.tagName;
-            seg.predicates.forEach((pred) => {
-              if (pred.type === "position") {
-                path += `[${pred.value}]`;
-              } else if (pred.type === "attribute") {
-                path += `[@${pred.name}='${pred.value}']`;
-              }
-            });
-            return path;
-          })
-          .join("/");
-
-        vscode.window.showWarningMessage(
-          `Partial match found at depth ${result.matchedDepth}/${result.totalDepth}. ` +
-            `Found: /${matchedPath} at line ${position.line + 1}`
-        );
-      } else {
-        vscode.window.showInformationMessage(
-          `Found: ${result.tagName} at line ${position.line + 1}`
-        );
-      }
+  registerSimpleCommand(context, "xmlXpath.listIdentifyingChildren", async () => {
+    const arr = vscode.workspace.getConfiguration("xmlXpath").get("smartRelativeIdentifyingChildren");
+    if (!Array.isArray(arr) || arr.length === 0) {
+      notifyIfAllowed("No identifying children configured");
     } else {
-      vscode.window.showWarningMessage(`XPath not found: ${xpath}`);
+      notifyIfAllowed("Identifying children: " + arr.join(", "));
     }
-  } catch (error) {
-    vscode.window.showErrorMessage(`Invalid XPath or error: ${error.message}`);
-  }
-}
-
-async function copyUniversalXPath() {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || !isXmlLanguage(editor.document)) return;
-
-  try {
-    // Save current configuration loader function
-    const originalLoader = xpathBuilder.loadConfiguration;
-
-    // Override with universal settings - preserve attribute-based indexing settings
-    const currentConfig = originalLoader();
-    xpathBuilder.loadConfiguration = function () {
-      return {
-        parentTag: null,
-        mode: { includeIndices: true, includeAttributes: true },
-        preferredAttributes: currentConfig.preferredAttributes || [],
-        ignoreTags: new Set(),
-        disableLeafIndex: false,
-        skipSingleIndex: false,
-        useXlinkLabelIndex: false,
-        useParentScopedIndices: false,
-        ignoreParentSegment: false,
-        predicateTemplate: "[@{attr1}='{attr1V}']",
-        xlinkLabelPattern: { type: "any", pattern: "" },
-        forceIndexOneFor: new Set(),
-        exceptionsToIndexOneForcing: new Set(),
-        useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
-        attributeBasedIndexingAttribute: currentConfig.attributeBasedIndexingAttribute,
-      };
-    };
-
-    // Generate XPath with universal settings
-    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
-
-    // Restore original configuration loader
-    xpathBuilder.loadConfiguration = originalLoader;
-
-    if (xpath) {
-      await vscode.env.clipboard.writeText(xpath);
-      vscode.window.showInformationMessage(`Copied universal XPath: ${xpath}`);
-    }
-  } catch (error) {
-    console.error("Error copying universal XPath:", error);
-    vscode.window.showErrorMessage("Could not compute XPath.");
-  }
-}
-
-// 1. Fix the searchForElement function to properly handle attribute-based indexing
-function searchForElement(events, xpathSegments, xml, config) {
-  const stack = [];
-  let bestMatch = null;
-  let maxMatchedDepth = 0;
-
-  // Initialize counters exactly like in buildElementStack
-  const counters = config.useParentScopedIndices ? {} : [];
-  const attributeCounters = {};
-
-  for (let i = 0; i < events.length; i++) {
-    const event = events[i];
-
-    if (event.type === "open") {
-      const depth = stack.length;
-      let idx;
-
-      // Determine which attribute to use for indexing (from buildElementStack logic)
-      let indexingAttribute = null;
-      let indexingValue = null;
-
-      if (config.useAttributeBasedIndexing) {
-        if (config.preferredAttributes && config.preferredAttributes.length > 0) {
-          for (const attr of config.preferredAttributes) {
-            if (event.attrs && event.attrs[attr]) {
-              indexingAttribute = attr;
-              indexingValue = event.attrs[attr];
-              break;
-            }
-          }
-        }
-        if (!indexingAttribute && config.attributeBasedIndexingAttribute) {
-          if (event.attrs && event.attrs[config.attributeBasedIndexingAttribute]) {
-            indexingAttribute = config.attributeBasedIndexingAttribute;
-            indexingValue = event.attrs[config.attributeBasedIndexingAttribute];
-          }
-        }
-      }
-
-      // Calculate index based on mode (matching buildElementStack exactly)
-      if (config.useAttributeBasedIndexing && indexingAttribute && indexingValue) {
-        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
-        if (!attributeCounters[key]) attributeCounters[key] = 0;
-        attributeCounters[key]++;
-        idx = attributeCounters[key];
-      } else if (config.useParentScopedIndices) {
-        const parentPath = stack.map((e) => `${e.tag}[${e.index}]`).join("/");
-        if (!counters[parentPath]) counters[parentPath] = {};
-        counters[parentPath][event.tag] =
-          (counters[parentPath][event.tag] || 0) + 1;
-        idx = counters[parentPath][event.tag];
-      } else {
-        if (!counters[depth]) counters[depth] = {};
-        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-        idx = counters[depth][event.tag];
-      }
-
-      // Collect ALL preferred attributes for this element
-      const preferredAttrs = [];
-      if (event.attrs && config.preferredAttributes) {
-        for (const attrName of config.preferredAttributes) {
-          if (event.attrs[attrName]) {
-            preferredAttrs.push({
-              name: attrName,
-              value: event.attrs[attrName],
-            });
-          }
-        }
-      }
-
-      // Add to stack with all the same properties as buildElementStack
-      stack.push({
-        tag: event.tag,
-        idx: idx,
-        index: idx,
-        customIndex: event.customIndex,
-        customIndexRaw: event.customIndexRaw,
-        attrs: event.attrs,
-        indexingAttribute: indexingAttribute,
-        indexingValue: indexingValue,
-        preferredAttrs: preferredAttrs,
-        startOffset: event.pos,
-        eventIndex: i,
-      });
-
-      // Rest of the matching logic...
-      const matchResult = checkFullMatchWithConfig(stack, xpathSegments, config);
-
-      // Update best match if deeper match found
-      if (matchResult.depth > maxMatchedDepth) {
-        maxMatchedDepth = matchResult.depth;
-
-        const matchedElementIndex = matchResult.depth - 1;
-        if (matchedElementIndex >= 0 && matchedElementIndex < stack.length) {
-          const matchedElement = stack[matchedElementIndex];
-
-          let endOffset =
-            matchedElement.startOffset + matchedElement.tag.length + 2;
-          let openCount = 1;
-
-          for (let j = matchedElement.eventIndex + 1; j < events.length; j++) {
-            if (events[j].tag === matchedElement.tag) {
-              if (events[j].type === "open") {
-                openCount++;
-              } else if (events[j].type === "close") {
-                openCount--;
-                if (openCount === 0) {
-                  endOffset = events[j].pos + events[j].tag.length + 3;
-                  break;
-                }
-              }
-            }
-          }
-
-          bestMatch = {
-            tagName: matchedElement.tag,
-            startOffset: matchedElement.startOffset,
-            endOffset: endOffset,
-            attrs: matchedElement.attrs,
-            matchedDepth: matchResult.depth,
-            totalDepth: xpathSegments.length,
-            isPartial: !matchResult.isFullMatch,
-          };
-        }
-      }
-
-      // Check for full match
-      if (matchResult.isFullMatch) {
-        const lastElement = stack[stack.length - 1];
-        let endOffset = lastElement.startOffset + lastElement.tag.length + 2;
-        let openCount = 1;
-
-        for (let j = i + 1; j < events.length; j++) {
-          if (events[j].tag === lastElement.tag) {
-            if (events[j].type === "open") {
-              openCount++;
-            } else if (events[j].type === "close") {
-              openCount--;
-              if (openCount === 0) {
-                endOffset = events[j].pos + events[j].tag.length + 3;
-                break;
-              }
-            }
-          }
-        }
-
-        return {
-          tagName: lastElement.tag,
-          startOffset: lastElement.startOffset,
-          endOffset: endOffset,
-          attrs: lastElement.attrs,
-          matchedDepth: xpathSegments.length,
-          totalDepth: xpathSegments.length,
-          isPartial: false,
-        };
-      }
-    } else if (event.type === "close") {
-      if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) {
-        stack.pop();
-      }
-    }
-  }
-
-  return bestMatch;
-}
-
-// Helper function that considers configuration
-function checkFullMatchWithConfig(stack, xpathSegments, config) {
-  let depth = 0;
-  const matchedPath = [];
-
-  for (let i = 0; i < Math.min(stack.length, xpathSegments.length); i++) {
-    const stackItem = stack[i];
-    const xpathSegment = xpathSegments[i];
-
-    // Check tag name
-    if (stackItem.tag !== xpathSegment.tagName) {
-      break;
-    }
-
-    // Check all predicates
-    let allPredicatesMatch = true;
-    let pathPart = stackItem.tag;
-
-    for (const predicate of xpathSegment.predicates) {
-      if (predicate.type === "position") {
-        // Handle position based on configuration
-        let expectedIndex = predicate.value;
-        let actualIndex = stackItem.index;
-
-        if (config.useXlinkLabelIndex && stackItem.customIndex !== undefined) {
-          actualIndex = stackItem.customIndex;
-        }
-
-        if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute && stackItem.attrs && stackItem.attrs[config.attributeBasedIndexingAttribute]) {
-          // The stackItem.index already considers attribute-based indexing in searchForElement
-          // so we can compare directly
-          if (actualIndex !== expectedIndex) {
-            allPredicatesMatch = false;
-            break;
-          }
-        } else {
-          if (actualIndex !== expectedIndex) {
-            allPredicatesMatch = false;
-            break;
-          }
-        }
-        pathPart += `[${predicate.value}]`;
-      } else if (predicate.type === "attribute") {
-        if (!stackItem.attrs || stackItem.attrs[predicate.name] !== predicate.value) {
-          allPredicatesMatch = false;
-          break;
-        }
-        pathPart += `[@${predicate.name}='${predicate.value}']`;
-      } else if (predicate.type === "contains") {
-        if (!stackItem.attrs || !stackItem.attrs[predicate.target] || !stackItem.attrs[predicate.target].includes(predicate.value)) {
-          allPredicatesMatch = false;
-          break;
-        }
-      } else if (predicate.type === "text") {
-        // For text predicates we'd need to inspect child text nodes — skip for now or implement if needed
-        allPredicatesMatch = false;
-        break;
-      } else if (predicate.type === "last") {
-        // Handling last() would require counting siblings — not implemented in searchForElement
-        allPredicatesMatch = false;
-        break;
-      }
-    }
-
-    if (!allPredicatesMatch) {
-      break;
-    }
-
-    matchedPath.push(pathPart);
-    depth++;
-  }
-
-  return {
-    depth: depth,
-    isFullMatch: depth === xpathSegments.length,
-    matchedPath: "/" + matchedPath.join("/"),
-  };
-}
-
-function matchesXPath(stack, xpathSegments) {
-  if (stack.length !== xpathSegments.length) return false;
-
-  for (let i = 0; i < stack.length; i++) {
-    const stackItem = stack[i];
-    const xpathSegment = xpathSegments[i];
-
-    if (stackItem.tag !== xpathSegment.tagName) return false;
-
-    for (const predicate of xpathSegment.predicates) {
-      if (predicate.type === "position") {
-        if (stackItem.index !== predicate.value) {
-          return false;
-        }
-      } else if (predicate.type === "attribute") {
-        if (!stackItem.attrs || !stackItem.attrs.hasOwnProperty(predicate.name) || stackItem.attrs[predicate.name] !== predicate.value) {
-          return false;
-        }
-      }
-    }
-  }
-
-  return true;
-}
-
-async function setParentTag() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentValue = cfg.get("parentTag", "");
-
-  // Get the tag under cursor
-  let tagUnderCursor = "";
-  const editor = vscode.window.activeTextEditor;
-  if (editor && isXmlLanguage(editor.document)) {
-    try {
-      // Get the current element stack
-      const xml = editor.document.getText();
-      const offset = editor.document.offsetAt(editor.selection.active);
-      const config = xpathBuilder.loadConfiguration();
-
-      const events = xpathBuilder.tokenizeXML(xml, config);
-      if (events) {
-        const stackResult = xpathBuilder.buildElementStack(events, offset, config);
-        if (stackResult && stackResult.stack.length > 0) {
-          // Get the tag name of the current element
-          tagUnderCursor = stackResult.stack[stackResult.stack.length - 1].tag;
-        }
-      }
-    } catch (error) {
-      console.error("Error getting tag under cursor:", error);
-    }
-  }
-
-  const value = await vscode.window.showInputBox({
-    prompt: "Parent tag for relative XPath",
-    value: tagUnderCursor || currentValue,
-    placeHolder: currentValue || tagUnderCursor || "e.g., section, div, body",
   });
 
-  if (value !== undefined) {
-    await cfg.update("parentTag", value || null, vscode.ConfigurationTarget.Global);
-    update();
-
-    if (value) {
-      vscode.window.showInformationMessage(
-        `Parent tag set to: ${value}. XPaths will now be relative to <${value}>`
-      );
-    }
-  }
-}
-
-async function setPredicateTemplate() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentValue = cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']");
-
-  const examples = [
-    { label: "Default: [@attr='value']", value: "[@{attr1}='{attr1V}']" },
-    { label: "Hash: [#attr='value']", value: "[#{attr1}='{attr1V}']" },
-    { label: "Dot: [.attr='value']", value: "[.{attr1}='{attr1V}']" },
-    { label: "Colon: [attr:value='value']", value: "[{attr1}:value='{attr1V}']" },
-    { label: "Contains: [contains(@attr, 'value')]", value: "[contains({at}{attr1}, '{attr1V}')]" },
-    { label: "Position: [@attr='value'][position()=n]", value: "[@{attr1}='{attr1V}'][position()={idx}]" },
-    { label: "Text: [text()='value']", value: "[text()='{attr1V}']" },
-    { label: "Custom...", value: "__custom__" },
-  ];
-
-  const pick = await vscode.window.showQuickPick(examples, {
-    placeHolder: "Select a predicate template or choose Custom",
+  // NEW: notifications toggle command (adds convenience)
+  registerSimpleCommand(context, "xmlXpath.toggleNotifications", async () => {
+    const cfg = vscode.workspace.getConfiguration("xmlXpath");
+    const cur = cfg.get("showNotifications", true);
+    await cfg.update("showNotifications", !cur, vscode.ConfigurationTarget.Global);
+    notifyIfAllowed(`showNotifications set to ${!cur}`);
   });
 
-  if (!pick) return;
+  // initial status update
+  updateStatusBar(vscode.window.activeTextEditor);
 
-  let value = pick.value;
-  if (value === "__custom__") {
-    value = await vscode.window.showInputBox({
-      prompt: "Predicate template. Tokens: {at}=@, {attr1}, {attr1V}, {tag}, {idx}, {xllv}, {xllvI}",
-      value: currentValue,
-      placeHolder: "[@{attr1}='{attr1V}']",
-      validateInput: (value) => {
-        if (!value) return "Template cannot be empty";
-        if (!value.includes("{attr1}") && !value.includes("{attr1V}")) {
-          return "Template should include {attr1} or {attr1V} token";
-        }
-        return null;
-      },
-    });
-  }
-
-  if (value) {
-    await cfg.update("predicateTemplate", value, vscode.ConfigurationTarget.Global);
-    update();
-
-    const example = value
-      .replace(/{at}/g, "@")
-      .replace(/{attr1}/g, "id")
-      .replace(/{attr1V}/g, "example")
-      .replace(/{tag}/g, "div")
-      .replace(/{idx}/g, "1");
-    vscode.window.showInformationMessage(`Template set. Example: ${example}`);
-  }
-}
-
-async function setXlinkLabelPattern() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentPattern = cfg.get("xlinkLabelPattern", { type: "any", pattern: "" });
-
-  const patternTypes = [
-    { label: "Any number (default)", description: "Extract any number found in xlink:label", value: { type: "any", pattern: "" } },
-    { label: "Starts with pattern", description: "e.g., 'order_' to match order_123", value: { type: "startsWith", pattern: "__input__" } },
-    { label: "Contains pattern", description: "e.g., 'item' to match item123 or myitem456", value: { type: "contains", pattern: "__input__" } },
-    { label: "Ends with pattern", description: "e.g., '_id' to match user_id, order_id", value: { type: "endsWith", pattern: "__input__" } },
-    { label: "Regex pattern", description: "Custom regex to extract number", value: { type: "regex", pattern: "__input__" } },
-    { label: "Exact prefix", description: "e.g., 'ID:' to match ID:123 exactly", value: { type: "exactPrefix", pattern: "__input__" } },
-  ];
-
-  const pick = await vscode.window.showQuickPick(patternTypes, { placeHolder: "Select how to match xlink:label values" });
-  if (!pick) return;
-
-  let pattern = pick.value.pattern;
-  if (pattern === "__input__") {
-    const examples = {
-      startsWith: "e.g., 'order_' for order_123",
-      contains: "e.g., 'item' for myitem456",
-      endsWith: "e.g., '_id' for user_id",
-      regex: "e.g., 'ID:(\\d+)' for ID:123",
-      exactPrefix: "e.g., 'REF-' for REF-789",
-    };
-
-    pattern = await vscode.window.showInputBox({
-      prompt: `Enter the ${pick.value.type} pattern`,
-      placeHolder: examples[pick.value.type] || "Enter pattern",
-      value: currentPattern.type === pick.value.type ? currentPattern.pattern : "",
-    });
-
-    if (!pattern) return;
-  }
-
-  const newPattern = { type: pick.value.type, pattern };
-  await cfg.update("xlinkLabelPattern", newPattern, vscode.ConfigurationTarget.Global);
-  update();
-
-  vscode.window.showInformationMessage(`xlink:label pattern set to: ${pick.value.type}${pattern ? ` "${pattern}"` : ""}`);
-}
-
-async function clearParentTag() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("parentTag", null, vscode.ConfigurationTarget.Global);
-  update();
-  vscode.window.showInformationMessage("Parent tag cleared.");
+  // cleanup on deactivate
+  context.subscriptions.push({
+    dispose() {
+      if (statusBarItem) {
+        statusBarItem.dispose();
+        statusBarItem = null;
+      }
+    }
+  });
 }
 
 function deactivate() {
   if (statusBarItem) statusBarItem.dispose();
 }
 
-function debounce(func, wait) {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
-}
-
-async function updateConfig(key, prompt, transformer) {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentValue = cfg.get(key);
-
-  let placeholderValue = "";
-  if (currentValue !== null && currentValue !== undefined) {
-    if (Array.isArray(currentValue)) {
-      placeholderValue = currentValue.join(", ");
-    } else {
-      placeholderValue = String(currentValue);
-    }
-  }
-
-  const value = await vscode.window.showInputBox({
-    prompt,
-    value: placeholderValue,
-    placeHolder: placeholderValue || "No value set",
-  });
-
-  if (value !== undefined) {
-    const finalValue = transformer ? transformer(value) : value || null;
-    await cfg.update(key, finalValue, vscode.ConfigurationTarget.Global);
-    update();
-  }
-}
-
-async function toggleConfig(key, message) {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get(key, false);
-  await cfg.update(key, !current, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`${message}: ${!current ? "ON" : "OFF"}`);
-  update();
-}
-
-async function setMode() {
-  const options = [
-    { label: "Both", value: { includeIndices: true, includeAttributes: true } },
-    { label: "Attributes Only", value: { includeIndices: false, includeAttributes: true } },
-    { label: "Indices Only", value: { includeIndices: true, includeAttributes: false } },
-    { label: "Simple (Tag path only)", value: { includeIndices: false, includeAttributes: false } },
-  ];
-  const pick = await vscode.window.showQuickPick(options, {
-    placeHolder: "Select XPath generation mode",
-  });
-  if (pick) {
-    await vscode.workspace.getConfiguration(CONFIG_SECTION).update("mode", pick.value, vscode.ConfigurationTarget.Global);
-    update();
-  }
-}
-
-// 3. Update the copyXPath function to ensure config is loaded properly
-async function copyXPath() {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || !isXmlLanguage(editor.document)) return;
-
-  try {
-    const config = xpathBuilder.loadConfiguration();
-
-    if (config.useAttributeBasedIndexing) {
-      console.log(
-        `Attribute-based indexing enabled with attribute: ${config.attributeBasedIndexingAttribute}`
-      );
-    }
-
-    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
-
-    if (xpath) {
-      await vscode.env.clipboard.writeText(xpath);
-      vscode.window.showInformationMessage(`Copied: ${xpath}`);
-    }
-  } catch (error) {
-    console.error("Error copying XPath:", error);
-    vscode.window.showErrorMessage("Could not compute XPath.");
-  }
-}
-
-function isXmlLanguage(document) {
-  const xmlLanguages = ["xml", "xsl", "xsd", "wsdl", "xaml", "svg", "xhtml"];
-  return xmlLanguages.includes(document.languageId);
-}
-
-// update() with enhanced debug logging
-function update() {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || !isXmlLanguage(editor.document)) {
-    return statusBarItem.hide();
-  }
-
-  try {
-    const config = xpathBuilder.loadConfiguration();
-
-    if (config.useAttributeBasedIndexing) {
-      console.log(
-        `Attribute-based indexing is ENABLED with attribute: ${config.attributeBasedIndexingAttribute}`
-      );
-    } else {
-      console.log("Attribute-based indexing is DISABLED");
-    }
-
-    if (config.useXlinkLabelIndex) {
-      console.log("xlink:label indexing is ENABLED");
-    }
-
-    // Log smart-relative landmark mode
-    if (config.useSmartRelativePath) {
-      console.log(`Smart relative enabled. Landmark mode: ${config.smartRelativeLandmarkMode ? "ON" : "OFF"}`);
-    }
-
-    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
-
-    if (xpath) {
-      const displayXPath = xpath.length > 80 ? xpath.substring(0, 77) + "..." : xpath;
-      statusBarItem.text = `$(code) ${displayXPath}`;
-      statusBarItem.tooltip = `XPath: ${xpath}\n(Click to copy)`;
-      statusBarItem.show();
-    } else {
-      statusBarItem.hide();
-    }
-  } catch (error) {
-    console.error("Error updating status bar:", error);
-    statusBarItem.hide();
-  }
-}
-
-module.exports = {
-  activate,
-  deactivate,
-};
+module.exports = { activate, deactivate };
