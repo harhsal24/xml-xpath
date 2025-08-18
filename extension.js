@@ -65,6 +65,8 @@ xpathBuilder.loadConfiguration = function () {
       "smartRelativeVirtualRootMode",
       "include"
     ),
+    // NEW: landmark mode setting
+    smartRelativeLandmarkMode: cfg.get("smartRelativeLandmarkMode", true),
     smartRelativeAlwaysIncludeTags: cfg.get("smartRelativeAlwaysIncludeTags", []),
     smartRelativeDontIgnoreAfter: cfg.get("smartRelativeDontIgnoreAfter", ""),
   };
@@ -179,6 +181,8 @@ function registerCommands(context) {
     "xmlXpath.clearAlwaysIncludeTags": clearAlwaysIncludeTagsCommand,
     "xmlXpath.setDontIgnoreAfterFromCursor": setDontIgnoreAfterFromCursor,
     "xmlXpath.clearDontIgnoreAfter": clearDontIgnoreAfterCommand,
+    // NEW: toggle for landmark mode
+    "xmlXpath.toggleSmartRelativeLandmarkMode": toggleSmartRelativeLandmarkMode,
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -379,6 +383,15 @@ async function toggleSmartRelativeIgnoreLastElement() {
   const current = cfg.get("smartRelativeIgnoreLastElement", false);
   await cfg.update("smartRelativeIgnoreLastElement", !current, vscode.ConfigurationTarget.Global);
   vscode.window.showInformationMessage(`Smart Relative Ignore Last Element: ${!current ? "ON" : "OFF"}`);
+  update();
+}
+
+// NEW: Toggle landmark mode for smart relative
+async function toggleSmartRelativeLandmarkMode() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeLandmarkMode", true);
+  await cfg.update("smartRelativeLandmarkMode", !current, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`Smart Relative Landmark Mode: ${!current ? "ON" : "OFF"}`);
   update();
 }
 
@@ -1271,6 +1284,11 @@ function update() {
 
     if (config.useXlinkLabelIndex) {
       console.log("xlink:label indexing is ENABLED");
+    }
+
+    // Log smart-relative landmark mode
+    if (config.useSmartRelativePath) {
+      console.log(`Smart relative enabled. Landmark mode: ${config.smartRelativeLandmarkMode ? "ON" : "OFF"}`);
     }
 
     const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);

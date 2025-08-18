@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.2.0",
+  "version": "3.5.2",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -32,11 +32,8 @@
     "onCommand:xmlXpath.clearAlwaysIncludeTags",
     "onCommand:xmlXpath.setDontIgnoreAfterFromCursor",
     "onCommand:xmlXpath.clearDontIgnoreAfter",
-    "onCommand:xmlXpath.setForceIndexOneFor",
-    "onCommand:xmlXpath.setExceptionsToIndexOneForcing",
-    "onCommand:xmlXpath.toggleAttributeBasedIndexing",
-    "onCommand:xmlXpath.setAttributeBasedIndexingAttribute",
     "onCommand:xmlXpath.toggleUseSmartRelativePath",
+    "onCommand:xmlXpath.toggleSmartRelativeLandmarkMode",
     "onCommand:xmlXpath.setSmartRelativeNamespacePrefix",
     "onCommand:xmlXpath.setSmartRelativeSignificantAttributes",
     "onCommand:xmlXpath.toggleSmartRelativeIgnoreLastElement",
@@ -44,10 +41,14 @@
     "onCommand:xmlXpath.setSmartRelativeVirtualRoot",
     "onCommand:xmlXpath.toggleSmartRelativeVirtualRootMode",
     "onCommand:xmlXpath.clearSmartRelativeVirtualRoot",
-    "onCommand:xmlXpath.addAlwaysIncludeTagFromCursor",
-    "onCommand:xmlXpath.clearAlwaysIncludeTags",
-    "onCommand:xmlXpath.setDontIgnoreAfterFromCursor",
-    "onCommand:xmlXpath.clearDontIgnoreAfter"
+    "onCommand:xmlXpath.setSmartRelativeSignificantAttributes",
+    "onCommand:xmlXpath.setForceIndexOneFor",
+    "onCommand:xmlXpath.setExceptionsToIndexOneForcing",
+    "onCommand:xmlXpath.toggleAttributeBasedIndexing",
+    "onCommand:xmlXpath.setAttributeBasedIndexingAttribute",
+    "onCommand:xmlXpath.toggleUseRelativePath",
+    "onCommand:xmlXpath.toggleIncludeNamespaces",
+    "onCommand:xmlXpath.toggleIncludeDefaultNamespaces"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -160,6 +161,11 @@
       {
         "command": "xmlXpath.toggleUseSmartRelativePath",
         "title": "XML XPath: Toggle Smart Relative Path",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.toggleSmartRelativeLandmarkMode",
+        "title": "XML XPath: Toggle Smart Relative Landmark Mode",
         "category": "XML XPath"
       },
       {
@@ -443,7 +449,10 @@
         },
         "xmlXpath.smartRelativeVirtualRootMode": {
           "type": "string",
-          "enum": ["include", "exclude"],
+          "enum": [
+            "include",
+            "exclude"
+          ],
           "default": "include",
           "enumDescriptions": [
             "Include the virtual root element in the XPath",
@@ -465,14 +474,6 @@
       }
     }
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/HB24/xml-xpath-extension.git"
-  },
-  "bugs": {
-    "url": "https://github.com/HB24/xml-xpath-extension/issues"
-  },
-  "homepage": "https://github.com/HB24/xml-xpath-extension#readme",
   "dependencies": {
     "fast-xml-parser": "^4.5.3"
   },
