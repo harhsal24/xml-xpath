@@ -12,6 +12,7 @@
   "activationEvents": [
     "onLanguage:xml",
     "onCommand:xmlXpath.copyXPath",
+    "onCommand:xmlXpath.copyUniversalXPath",
     "onCommand:xmlXpath.setParent",
     "onCommand:xmlXpath.clearParent",
     "onCommand:xmlXpath.setMode",
@@ -41,14 +42,14 @@
     "onCommand:xmlXpath.setSmartRelativeVirtualRoot",
     "onCommand:xmlXpath.toggleSmartRelativeVirtualRootMode",
     "onCommand:xmlXpath.clearSmartRelativeVirtualRoot",
-    "onCommand:xmlXpath.setSmartRelativeSignificantAttributes",
     "onCommand:xmlXpath.setForceIndexOneFor",
     "onCommand:xmlXpath.setExceptionsToIndexOneForcing",
     "onCommand:xmlXpath.toggleAttributeBasedIndexing",
     "onCommand:xmlXpath.setAttributeBasedIndexingAttribute",
-    "onCommand:xmlXpath.toggleUseRelativePath",
-    "onCommand:xmlXpath.toggleIncludeNamespaces",
-    "onCommand:xmlXpath.toggleIncludeDefaultNamespaces"
+    "onCommand:xmlXpath.addIdentifyingChildFromCursor",
+    "onCommand:xmlXpath.removeIdentifyingChildFromCursor",
+    "onCommand:xmlXpath.clearIdentifyingChildren",
+    "onCommand:xmlXpath.listIdentifyingChildren"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -56,6 +57,11 @@
       {
         "command": "xmlXpath.copyXPath",
         "title": "XML XPath: Copy XPath from Cursor",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.copyUniversalXPath",
+        "title": "XML XPath: Copy Universal XPath from Cursor",
         "category": "XML XPath"
       },
       {
@@ -222,6 +228,26 @@
         "command": "xmlXpath.clearDontIgnoreAfter",
         "title": "XML XPath: Clear 'Don't Ignore After' Anchor",
         "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.addIdentifyingChildFromCursor",
+        "title": "XML XPath: Add Smart-Relative Identifying Child (from cursor)",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.removeIdentifyingChildFromCursor",
+        "title": "XML XPath: Remove Smart-Relative Identifying Child (from cursor)",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.clearIdentifyingChildren",
+        "title": "XML XPath: Clear Smart-Relative Identifying Children",
+        "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.listIdentifyingChildren",
+        "title": "XML XPath: List Smart-Relative Identifying Children",
+        "category": "XML XPath"
       }
     ],
     "keybindings": [
@@ -270,6 +296,11 @@
         },
         {
           "command": "xmlXpath.addAlwaysIncludeTagFromCursor",
+          "when": "editorLangId == xml",
+          "group": "xmlXpath"
+        },
+        {
+          "command": "xmlXpath.addIdentifyingChildFromCursor",
           "when": "editorLangId == xml",
           "group": "xmlXpath"
         },

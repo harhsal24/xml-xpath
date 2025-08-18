@@ -29,52 +29,32 @@ xpathBuilder.loadConfiguration = function () {
     useParentScopedIndices: cfg.get("useParentScopedIndices", false),
     ignoreParentSegment: cfg.get("ignoreParentSegment", false),
     predicateTemplate: cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']"),
-    xlinkLabelPattern: cfg.get("xlinkLabelPattern", {
-      type: "any",
-      pattern: "",
-    }),
+    xlinkLabelPattern: cfg.get("xlinkLabelPattern", { type: "any", pattern: "" }),
     forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
-    exceptionsToIndexOneForcing: new Set(
-      cfg.get("exceptionsToIndexOneForcing", [])
-    ),
+    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", [])),
     useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", false),
-    attributeBasedIndexingAttribute: cfg.get(
-      "attributeBasedIndexingAttribute",
-      ""
-    ),
+    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", ""),
     useRelativePath: cfg.get("useRelativePath", false),
     includeNamespaces: cfg.get("includeNamespaces", false),
     includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false),
     useSmartRelativePath: cfg.get("useSmartRelativePath", false),
     smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", "d"),
-    smartRelativeSignificantAttributes: cfg.get(
-      "smartRelativeSignificantAttributes",
-      []
-    ),
-    smartRelativeIdentifyingChildren: cfg.get(
-      "smartRelativeIdentifyingChildren",
-      []
-    ),
-    smartRelativeIgnoreLastElement: cfg.get(
-      "smartRelativeIgnoreLastElement",
-      false
-    ),
+    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", []),
+    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", []),
+    smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", false),
     smartRelativeSingleLine: cfg.get("smartRelativeSingleLine", false),
     smartRelativeVirtualRoot: cfg.get("smartRelativeVirtualRoot", ""),
-    smartRelativeVirtualRootMode: cfg.get(
-      "smartRelativeVirtualRootMode",
-      "include"
-    ),
-    // NEW: landmark mode setting
-    smartRelativeLandmarkMode: cfg.get("smartRelativeLandmarkMode", true),
+    smartRelativeVirtualRootMode: cfg.get("smartRelativeVirtualRootMode", "include"),
     smartRelativeAlwaysIncludeTags: cfg.get("smartRelativeAlwaysIncludeTags", []),
     smartRelativeDontIgnoreAfter: cfg.get("smartRelativeDontIgnoreAfter", ""),
+    smartRelativeLandmarkMode: cfg.get("smartRelativeLandmarkMode", true),
   };
 };
 
+
 function activate(context) {
   try {
-    console.log("XML XPath extension is activating...");
+    console.log('XML XPath extension is activating...');
 
     statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
@@ -93,12 +73,10 @@ function activate(context) {
 
     update();
 
-    console.log("XML XPath extension activated successfully");
+    console.log('XML XPath extension activated successfully');
   } catch (error) {
-    console.error("Error activating XML XPath extension:", error);
-    vscode.window.showErrorMessage(
-      `Failed to activate XML XPath: ${error.message}`
-    );
+    console.error('Error activating XML XPath extension:', error);
+    vscode.window.showErrorMessage(`Failed to activate XML XPath: ${error.message}`);
   }
 }
 
@@ -164,8 +142,7 @@ function registerCommands(context) {
       ),
     "xmlXpath.toggleAttributeBasedIndexing": () =>
       toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
-    "xmlXpath.setAttributeBasedIndexingAttribute":
-      setAttributeBasedIndexingAttribute,
+    "xmlXpath.setAttributeBasedIndexingAttribute": setAttributeBasedIndexingAttribute,
     "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
     "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
     "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
@@ -181,8 +158,14 @@ function registerCommands(context) {
     "xmlXpath.clearAlwaysIncludeTags": clearAlwaysIncludeTagsCommand,
     "xmlXpath.setDontIgnoreAfterFromCursor": setDontIgnoreAfterFromCursor,
     "xmlXpath.clearDontIgnoreAfter": clearDontIgnoreAfterCommand,
-    // NEW: toggle for landmark mode
+
+    // NEW commands to manage SmartRelative identifying children list
+    "xmlXpath.addIdentifyingChildFromCursor": addIdentifyingChildFromCursor,
+    "xmlXpath.removeIdentifyingChildFromCursor": removeIdentifyingChildFromCursor,
+    "xmlXpath.clearIdentifyingChildren": clearIdentifyingChildrenCommand,
+    "xmlXpath.listIdentifyingChildren": listIdentifyingChildrenCommand,
     "xmlXpath.toggleSmartRelativeLandmarkMode": toggleSmartRelativeLandmarkMode,
+
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -209,6 +192,33 @@ async function getTagUnderCursor() {
     }
   } catch (e) {
     console.error("Error in getTagUnderCursor:", e);
+  }
+  return "";
+}
+
+function getWordAtCursor() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return "";
+  const doc = editor.document;
+  const pos = editor.selection.active;
+
+  const range = doc.getWordRangeAtPosition(pos, /[A-Za-z0-9_:.\-]+/);
+  if (range) {
+    return doc.getText(range);
+  }
+
+  // fallback: try to look left/right one token by reading the line
+  const line = doc.lineAt(pos.line).text;
+  const idx = pos.character;
+  // regex to capture a token around idx
+  const tokenRegex = /[A-Za-z0-9_:.\-]+/g;
+  let match;
+  while ((match = tokenRegex.exec(line))) {
+    const s = match.index;
+    const e = s + match[0].length;
+    if (idx >= s && idx <= e) {
+      return match[0];
+    }
   }
   return "";
 }
@@ -244,13 +254,65 @@ async function addAlwaysIncludeTagFromCursor() {
   if (!updated.includes(tag)) {
     updated.push(tag);
     await cfg.update("smartRelativeAlwaysIncludeTags", updated, vscode.ConfigurationTarget.Global);
-
-    // No runtime changes necessary on xpathBuilder — it reads config in loadConfiguration()
     vscode.window.showInformationMessage(`Added '${tag}' to Smart Relative always-include list`);
     update();
   } else {
     vscode.window.showInformationMessage(`'${tag}' is already in the always-include list`);
   }
+}
+
+async function addIdentifyingChildFromCursor() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeIdentifyingChildren", []);
+  let tag = getWordAtCursor();
+
+  if (!tag) {
+    tag = await vscode.window.showInputBox({
+      prompt: "Child element name to treat as identifying (e.g. ImageCategoryType)",
+      placeHolder: "ImageCategoryType",
+      validateInput: (v) => {
+        if (!v) return "Name cannot be empty";
+        if (!/^[A-Za-z_][A-Za-z0-9_:\-\.]*$/.test(v)) return "Invalid XML element name";
+        return null;
+      },
+    });
+    if (!tag) return;
+  } else {
+    // quick confirmation
+    const confirm = await vscode.window.showQuickPick(["Yes", "No"], {
+      placeHolder: `Add '${tag}' to Smart Relative identifying-children list?`
+    });
+    if (confirm !== "Yes") return;
+  }
+
+  tag = tag.trim();
+  const updated = Array.isArray(current) ? [...current] : [];
+  if (!updated.includes(tag)) {
+    updated.push(tag);
+    await cfg.update("smartRelativeIdentifyingChildren", updated, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Added '${tag}' to smartRelativeIdentifyingChildren`);
+    update();
+  } else {
+    vscode.window.showInformationMessage(`'${tag}' is already in smartRelativeIdentifyingChildren`);
+  }
+}
+
+async function clearIdentifyingChildrenCommand() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  await cfg.update("smartRelativeIdentifyingChildren", [], vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage("smartRelativeIdentifyingChildren cleared");
+  update();
+}
+
+// Command: list identifying children (quick pick display)
+async function listIdentifyingChildrenCommand() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeIdentifyingChildren", []);
+  if (!Array.isArray(current) || current.length === 0) {
+    vscode.window.showInformationMessage("smartRelativeIdentifyingChildren is empty");
+    return;
+  }
+  await vscode.window.showQuickPick(current, { placeHolder: "Smart Relative identifying children" });
 }
 
 // Command: clear always-include list
@@ -261,7 +323,35 @@ async function clearAlwaysIncludeTagsCommand() {
   update();
 }
 
-// Command: set dont-ignore-after from cursor (or prompt), and persist
+async function removeIdentifyingChildFromCursor() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const current = cfg.get("smartRelativeIdentifyingChildren", []);
+  let tag = getWordAtCursor();
+
+  if (!tag) {
+    // present quick pick to remove from list
+    if (!Array.isArray(current) || current.length === 0) {
+      vscode.window.showInformationMessage("smartRelativeIdentifyingChildren is empty");
+      return;
+    }
+    const pick = await vscode.window.showQuickPick(current, {
+      placeHolder: "Choose identifying child to remove"
+    });
+    if (!pick) return;
+    tag = pick;
+  } else {
+    const confirm = await vscode.window.showQuickPick(["Yes", "No"], {
+      placeHolder: `Remove '${tag}' from Smart Relative identifying-children list?`
+    });
+    if (confirm !== "Yes") return;
+  }
+
+  const updated = Array.isArray(current) ? current.filter((c) => c !== tag) : [];
+  await cfg.update("smartRelativeIdentifyingChildren", updated, vscode.ConfigurationTarget.Global);
+  vscode.window.showInformationMessage(`Removed '${tag}' from smartRelativeIdentifyingChildren`);
+  update();
+}
+
 async function setDontIgnoreAfterFromCursor() {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const current = cfg.get("smartRelativeDontIgnoreAfter", "");
@@ -291,6 +381,7 @@ async function setDontIgnoreAfterFromCursor() {
   vscode.window.showInformationMessage(`Smart Relative: will not ignore tags after '${tag}'`);
   update();
 }
+
 
 // Command: clear dont-ignore-after anchor
 async function clearDontIgnoreAfterCommand() {
@@ -358,7 +449,9 @@ async function toggleSmartRelativeVirtualRootMode() {
   const newMode = current === "include" ? "exclude" : "include";
 
   await cfg.update("smartRelativeVirtualRootMode", newMode, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Virtual Root Mode: ${newMode.toUpperCase()}`);
+  vscode.window.showInformationMessage(
+    `Virtual Root Mode: ${newMode.toUpperCase()}`
+  );
   update();
 }
 

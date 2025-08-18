@@ -1,9 +1,4 @@
-// XPathBuilder.js
-// Complete XPath builder with support for smart relative features:
-// - smartRelativeDontIgnoreAfter: anchor tag after which all ancestors are included
-// - smartRelativeAlwaysIncludeTags: array of tags always treated as landmarks
-// - smartRelativeIgnoreLastElement: remove leaf when building smart-relative
-// The main public method: buildXPathRegex(document, position, externalConfig)
+// ========== File: XPathBuilder.js (Updated: explicit-empty disables identifying children) ==========
 
 const { XMLParser } = require("fast-xml-parser");
 
@@ -24,7 +19,6 @@ class XPathBuilder {
     this.parser = new XMLParser(parserOptions);
   }
 
-  // Default configuration used when extension doesn't pass external config
   loadConfiguration() {
     return {
       parentTag: null,
@@ -53,17 +47,17 @@ class XPathBuilder {
       smartRelativeVirtualRoot: "",
       smartRelativeVirtualRootMode: "include",
       smartRelativeIgnoreLastElement: false,
-      // New settings
+      smartRelativeAlwaysIncludeTags: [],
       smartRelativeDontIgnoreAfter: "",
-      smartRelativeAlwaysIncludeTags: []
+      smartRelativeLandmarkMode: true,
+      smartRelativeIndentSize: 4,
     };
   }
 
-  // Public entry point: accepts vscode document & position and optional externalConfig (plain object)
-  buildXPathRegex(document, position, externalConfig) {
+  buildXPathRegex(document, position) {
     const xml = document.getText();
     const offset = document.offsetAt(position);
-    const config = externalConfig || this.loadConfiguration();
+    const config = this.loadConfiguration();
 
     const events = this.tokenizeXML(xml, config);
     if (!events) return null;
@@ -77,12 +71,8 @@ class XPathBuilder {
     return this.generateXPath(path, config);
   }
 
-  // ------------ Tokenization & parsing helpers ------------
-
-  // Tokenize XML into lightweight events (open/close/text)
   tokenizeXML(xml, config) {
     const cleanedXml = this.preprocessForTokenization(xml);
-    // Matches: group1 = close slash?; group2 = tag name; group3 = attrs; group4 = self-close slash?; group5 = text content
     const tokenRegex = /<(\/)?([\w:\-\.]+)([^>]*?)(\/?)>|([^<]+)/g;
     const events = [];
     let match;
@@ -90,23 +80,20 @@ class XPathBuilder {
     try {
       while ((match = tokenRegex.exec(cleanedXml))) {
         if (match[5]) {
-          // Text content (non-tag)
           const textContent = match[5].trim();
           if (textContent) {
             events.push({
               type: "text",
               text: textContent,
-              pos: match.index
+              pos: match.index,
             });
           }
         } else {
-          // Tag token
           const event = this.parseXMLToken(match, config);
           if (event) {
             events.push(event);
-            // For self-closing tags, immediately add a close event
             if (event.type === "open" && event.selfClose) {
-              events.push({ type: "close", tag: event.tag, pos: event.pos + (match[0] ? match[0].length : 0) });
+              events.push({ type: "close", tag: event.tag, pos: event.pos });
             }
           }
         }
@@ -118,32 +105,31 @@ class XPathBuilder {
     }
   }
 
-  // Remove comments, declarations, CDATA, DOCTYPE to avoid confusing tokenization positions.
   preprocessForTokenization(xml) {
     let processed = xml;
-
-    // Replace comments, CDATA, xml declarations, doctypes and processing instructions with same-length spaces
-    processed = processed.replace(/<!--[\s\S]*?-->/g, (m) => " ".repeat(m.length));
-    processed = processed.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => " ".repeat(m.length));
-    processed = processed.replace(/<\?xml[^>]*\?>/gi, (m) => " ".repeat(m.length));
-    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (m) => " ".repeat(m.length));
-    processed = processed.replace(/<\?[^>]*\?>/g, (m) => " ".repeat(m.length));
-
+    processed = processed.replace(/<!--[\s\S]*?-->/g, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<\?xml[^>]*\?>/gi, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<!DOCTYPE[^>]*>/gi, (match) =>
+      " ".repeat(match.length)
+    );
+    processed = processed.replace(/<\?[^>]*\?>/g, (match) =>
+      " ".repeat(match.length)
+    );
     return processed;
   }
 
   parseXMLToken(match, config) {
-    // match indices:
-    // [0] full match, [1] closeSlash, [2] tag, [3] attrsText, [4] selfCloseSlash, [5] text
-    const fullMatch = match[0];
-    const closeSlash = match[1];
-    const tag = match[2];
-    const attrsText = match[3] || "";
-    const selfCloseSlash = match[4];
+    const [fullMatch, closeSlash, tag, attrsText, selfCloseSlash] = match;
     const pos = match.index;
 
     if (closeSlash) {
-      // close tag: set pos to end of tag for clarity
       return { type: "close", tag, pos: pos + fullMatch.length };
     }
 
@@ -158,11 +144,10 @@ class XPathBuilder {
       pos,
       selfClose: !!selfCloseSlash,
       namespaces: Object.keys(namespaces).length > 0 ? namespaces : null,
-      ...xlinkData
+      ...xlinkData,
     };
   }
 
-  // Parse attributes string into object; handles namespaced attributes; also fix common typo xlink:lable
   parseAttributes(attrsText) {
     const attrs = {};
     const attrRegex = /([\w:\-\.]+)\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
@@ -178,7 +163,6 @@ class XPathBuilder {
     return attrs;
   }
 
-  // Parse xlink:label according to config pattern to extract numeric index
   parseXlinkLabel(attrs, config) {
     const raw = attrs["xlink:label"] || attrs["xlink:lable"];
     if (!raw) return { customIndex: undefined, customIndexRaw: undefined };
@@ -186,60 +170,53 @@ class XPathBuilder {
     const xlinkPattern = config?.xlinkLabelPattern || { type: "any", pattern: "" };
     let numMatch = null;
 
-    try {
-      switch (xlinkPattern.type) {
-        case "startsWith":
-          if (raw.startsWith(xlinkPattern.pattern)) {
-            const afterPrefix = raw.substring(xlinkPattern.pattern.length);
-            numMatch = afterPrefix.match(/^\d+/);
+    switch (xlinkPattern.type) {
+      case "startsWith":
+        if (raw.startsWith(xlinkPattern.pattern)) {
+          const afterPrefix = raw.substring(xlinkPattern.pattern.length);
+          numMatch = afterPrefix.match(/^\d+/);
+        }
+        break;
+      case "contains":
+        if (raw.includes(xlinkPattern.pattern)) {
+          const idx = raw.indexOf(xlinkPattern.pattern);
+          const afterPattern = raw.substring(idx + xlinkPattern.pattern.length);
+          numMatch = afterPattern.match(/^\d+/);
+        }
+        break;
+      case "endsWith":
+        if (raw.endsWith(xlinkPattern.pattern)) {
+          const beforeSuffix = raw.substring(0, raw.length - xlinkPattern.pattern.length);
+          numMatch = beforeSuffix.match(/\d+$/);
+        }
+        break;
+      case "exactPrefix":
+        if (raw.startsWith(xlinkPattern.pattern)) {
+          const afterPrefix2 = raw.substring(xlinkPattern.pattern.length);
+          numMatch = afterPrefix2.match(/^\d+$/);
+        }
+        break;
+      case "regex":
+        try {
+          const regex = new RegExp(xlinkPattern.pattern);
+          const mat = raw.match(regex);
+          if (mat) {
+            numMatch = mat[1] ? [mat[1]] : mat[0].match(/\d+/);
           }
-          break;
-        case "contains":
-          if (raw.includes(xlinkPattern.pattern)) {
-            const idx = raw.indexOf(xlinkPattern.pattern);
-            const after = raw.substring(idx + xlinkPattern.pattern.length);
-            numMatch = after.match(/^\d+/);
-          }
-          break;
-        case "endsWith":
-          if (raw.endsWith(xlinkPattern.pattern)) {
-            const before = raw.substring(0, raw.length - xlinkPattern.pattern.length);
-            numMatch = before.match(/\d+$/);
-          }
-          break;
-        case "exactPrefix":
-          if (raw.startsWith(xlinkPattern.pattern)) {
-            const afterPrefix = raw.substring(xlinkPattern.pattern.length);
-            numMatch = afterPrefix.match(/^\d+$/);
-          }
-          break;
-        case "regex":
-          try {
-            const regex = new RegExp(xlinkPattern.pattern);
-            const m = raw.match(regex);
-            if (m) {
-              if (m[1]) numMatch = [m[1]];
-              else numMatch = m[0].match(/\d+/);
-            }
-          } catch (e) {
-            console.error("Invalid xlink regex pattern:", e);
-            numMatch = raw.match(/\d+/);
-          }
-          break;
-        case "any":
-        default:
+        } catch (e) {
+          console.error("Invalid xlink regex pattern:", e);
           numMatch = raw.match(/\d+/);
-          break;
-      }
-    } catch (e) {
-      numMatch = raw.match(/\d+/);
+        }
+        break;
+      case "any":
+      default:
+        numMatch = raw.match(/\d+/);
+        break;
     }
 
     const customIndex = numMatch ? parseInt(numMatch[0], 10) : undefined;
     return { customIndex, customIndexRaw: raw };
   }
-
-  // ------------ Build element stack with indexing --------------
 
   buildElementStack(events, offset, config) {
     const currentStack = [];
@@ -247,13 +224,13 @@ class XPathBuilder {
     const counters = config.useParentScopedIndices ? {} : [];
     const attributeCounters = {};
 
-    const namespaceMap = (config.includeNamespaces || config.includeDefaultNamespaces) ?
-      this.buildNamespaceMap(events) : {};
+    const namespaceMap = (config.includeNamespaces || config.includeDefaultNamespaces)
+      ? this.buildNamespaceMap(events)
+      : {};
 
     for (let i = 0; i < events.length; i++) {
       const event = events[i];
 
-      // Record the stack as soon as we pass the offset (but only once)
       if (event.pos > offset && !targetStack.length) {
         targetStack = [...currentStack];
       }
@@ -317,11 +294,10 @@ class XPathBuilder {
           customIndex: event.customIndex,
           customIndexRaw: event.customIndexRaw,
           attrs: event.attrs,
-          indexingAttribute: indexingAttribute,
-          indexingValue: indexingValue,
-          preferredAttrs: preferredAttrs,
-          namespaceContext: namespaceContext,
-          // NEW: store index of token event to locate children for identification
+          indexingAttribute,
+          indexingValue,
+          preferredAttrs,
+          namespaceContext,
           eventIndex: i,
           identifyingChildren: []
         });
@@ -336,7 +312,7 @@ class XPathBuilder {
       }
     }
 
-    // Populate identifying children for smart relative if needed
+    // IMPORTANT: only populate identifying children if smart relative requested
     if (config.useSmartRelativePath) {
       targetStack = this.populateIdentifyingChildren(events, targetStack, config);
     }
@@ -344,15 +320,24 @@ class XPathBuilder {
     if (!targetStack.length && currentStack.length > 0) {
       targetStack = [...currentStack];
     }
-
     return { stack: targetStack };
   }
 
+  // IMPORTANT CHANGE:
+  // If the user explicitly sets smartRelativeIdentifyingChildren = [] we *do not* use fallback defaults.
+  // If the setting is undefined (not present), we fall back to a useful default list.
   populateIdentifyingChildren(events, stack, config) {
-    const identifyingChildElements = config.smartRelativeIdentifyingChildren && config.smartRelativeIdentifyingChildren.length > 0 ?
-      config.smartRelativeIdentifyingChildren :
-      ['ImageCategoryType', 'id', 'name', 'type', 'category', 'status'];
+    let identifyingChildElements = [];
 
+    if (Array.isArray(config.smartRelativeIdentifyingChildren)) {
+      // explicit array provided by user
+      identifyingChildElements = config.smartRelativeIdentifyingChildren.slice(); // may be empty => intentionally disable detection
+    } else {
+      // not provided -> fallback defaults
+      identifyingChildElements = ['ImageCategoryType', 'id', 'name', 'type', 'category', 'status'];
+    }
+
+    // If the user provided an explicit empty array, this will result in no detection (as requested).
     for (let stackItem of stack) {
       stackItem.identifyingChildren = this.findIdentifyingChildren(
         events,
@@ -365,9 +350,12 @@ class XPathBuilder {
     return stack;
   }
 
-  // Find direct child elements of the parent and capture text for tags in identifyingTags
   findIdentifyingChildren(events, parentEventIndex, parentTag, identifyingTags) {
     const identifyingChildren = [];
+
+    // If identifyingTags is empty, return empty immediately (explicit disable)
+    if (!Array.isArray(identifyingTags) || identifyingTags.length === 0) return identifyingChildren;
+
     let depth = 0;
     let currentChildTag = null;
     let textContent = '';
@@ -376,38 +364,37 @@ class XPathBuilder {
       const event = events[i];
 
       if (event.type === 'open') {
-        if (depth === 0) {
+        depth++;
+        if (depth === 1) {
           currentChildTag = event.tag;
           textContent = '';
         }
-        depth++;
       } else if (event.type === 'close') {
-        depth--;
-        if (depth === 0 && currentChildTag && identifyingTags.includes(currentChildTag)) {
+        if (depth === 1 && currentChildTag && identifyingTags.includes(currentChildTag)) {
           identifyingChildren.push({
             name: currentChildTag,
             value: textContent.trim()
           });
+        }
+        depth--;
+        if (depth < 0) break;
+        if (depth === 0) {
           currentChildTag = null;
           textContent = '';
         }
-        if (depth < 0) {
-          break;
+      } else if (event.type === 'text') {
+        if (depth === 1 && currentChildTag && identifyingTags.includes(currentChildTag)) {
+          textContent += event.text || '';
         }
-      } else if (event.type === 'text' && depth === 1 && currentChildTag && identifyingTags.includes(currentChildTag)) {
-        textContent += event.text || '';
       }
     }
 
     return identifyingChildren;
   }
 
-  // ------------ XPath generation helpers ------------
-
   generateXPathSegment(node, index, pathLength, config) {
     const isLeaf = index === pathLength - 1;
 
-    // Apply namespace prefix if required
     let tagName = node.tag;
     if (config.includeNamespaces || config.includeDefaultNamespaces) {
       tagName = this.addNamespacePrefix(node.tag, node.namespaceContext, config);
@@ -415,14 +402,13 @@ class XPathBuilder {
 
     let segment = tagName;
 
-    // Attribute-based indexing: include all preferred attributes as predicates
     if (config.useAttributeBasedIndexing && node.preferredAttrs && node.preferredAttrs.length > 0) {
       for (const attr of node.preferredAttrs) {
         const escapedValue = this.escapeAttributeValue(attr.value);
         segment += `[@${attr.name}='${escapedValue}']`;
       }
     } else {
-      if (node.preferredAttrs && node.preferredAttrs.length > 0 && config.mode?.includeAttributes) {
+      if (node.preferredAttrs && node.preferredAttrs.length > 0) {
         const attr = node.preferredAttrs[0];
         const escapedValue = this.escapeAttributeValue(attr.value);
         segment += `[@${attr.name}='${escapedValue}']`;
@@ -452,11 +438,9 @@ class XPathBuilder {
     return path;
   }
 
-  // Top-level generateXPath chooses smart, relative, or absolute based on config
   generateXPath(path, config) {
     if (!path || path.length === 0) return "";
 
-    // Smart relative takes highest precedence
     if (config.useSmartRelativePath) {
       return this.generateSmartRelativeXPath(path, config);
     }
@@ -465,28 +449,24 @@ class XPathBuilder {
       return this.generateRelativeXPath(path, config);
     }
 
-    const segments = path.map((node, index) =>
-      this.generateXPathSegment(node, index, path.length, config)
-    );
+    const segments = path.map((node, index) => this.generateXPathSegment(node, index, path.length, config));
     return "/" + segments.join("/");
   }
 
   escapeAttributeValue(value) {
-    if (value === undefined || value === null) return "";
     return String(value).replace(/'/g, "&apos;");
   }
 
   generateAttributePredicate(node, config) {
-    if (!node.attrName || !node.attrValue || !config.mode?.includeAttributes) return "";
+    if (!node.attrName || !node.attrValue || !config.mode.includeAttributes) return "";
 
     if (config.predicateTemplate) {
       const escapedValue = this.escapeAttributeValue(node.attrValue);
       let predicate = config.predicateTemplate;
       const self = this;
-
       predicate = predicate.replace(/{at}/g, "@");
-      predicate = predicate.replace(/{tag}/g, node.tag || "");
-      predicate = predicate.replace(/{attr1}/g, node.attrName || "");
+      predicate = predicate.replace(/{tag}/g, node.tag);
+      predicate = predicate.replace(/{attr1}/g, node.attrName);
       predicate = predicate.replace(/{attr1V}/g, escapedValue);
       predicate = predicate.replace(/{idx}/g, node.idx);
 
@@ -507,7 +487,7 @@ class XPathBuilder {
 
       predicate = predicate.replace(/{pos}/g, node.idx);
       predicate = predicate.replace(/{lastPos}/g, `last()`);
-      predicate = predicate.replace(/{isFirst}/g, node.idx === 1 ? "true()" : "false()");
+      predicate = predicate.replace(/ {isFirst}/g, node.idx === 1 ? "true()" : "false()");
       predicate = predicate.replace(/{isLast}/g, `position()=last()`);
 
       if (node.customIndex !== undefined) {
@@ -517,18 +497,15 @@ class XPathBuilder {
 
       predicate = predicate.replace(/{attr1Lower}/g, (node.attrName || "").toLowerCase());
       predicate = predicate.replace(/{attr1Upper}/g, (node.attrName || "").toUpperCase());
-      predicate = predicate.replace(/{attr1VLower}/g, (escapedValue || "").toLowerCase());
-      predicate = predicate.replace(/{attr1VUpper}/g, (escapedValue || "").toUpperCase());
+      predicate = predicate.replace(/{attr1VLower}/g, escapedValue.toLowerCase());
+      predicate = predicate.replace(/{attr1VUpper}/g, escapedValue.toUpperCase());
 
-      predicate = predicate.replace(
-        /{if:([^:]+):([^:]+):([^}]+)}/g,
-        (match, condition, ifTrue, ifFalse) => {
-          if (condition === "hasId") return node.attrs?.id ? ifTrue : ifFalse;
-          if (condition === "hasClass") return node.attrs?.class ? ifTrue : ifFalse;
-          if (condition === "isFirst") return node.idx === 1 ? ifTrue : ifFalse;
-          return ifFalse;
-        }
-      );
+      predicate = predicate.replace(/{if:([^:]+):([^:]+):([^}]+)}/g, (match, condition, ifTrue, ifFalse) => {
+        if (condition === "hasId") return node.attrs?.id ? ifTrue : ifFalse;
+        if (condition === "hasClass") return node.attrs?.class ? ifTrue : ifFalse;
+        if (condition === "isFirst") return node.idx === 1 ? ifTrue : ifFalse;
+        return ifFalse;
+      });
 
       return predicate;
     }
@@ -538,39 +515,27 @@ class XPathBuilder {
   }
 
   generateIndex(node, isLeaf, config) {
-    if (!config.mode?.includeIndices || (isLeaf && config.disableLeafIndex)) return "";
+    if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex)) return "";
 
     const index = (config.useXlinkLabelIndex && node.customIndex != null) ? node.customIndex : node.idx;
 
-    // Exceptions handling
-    if (
-      index === 1 &&
+    if (index === 1 &&
       config.exceptionsToIndexOneForcing &&
-      config.exceptionsToIndexOneForcing.has &&
-      config.exceptionsToIndexOneForcing.has(node.tag)
-    ) {
+      config.exceptionsToIndexOneForcing.has(node.tag)) {
       return "";
     }
 
     if (index === 1) {
       if (config.skipSingleIndex) {
-        if (config.forceIndexOneFor && config.forceIndexOneFor.has && config.forceIndexOneFor.has(node.tag)) {
-          return "[1]";
-        }
-        if (config.ignoreTags && config.ignoreTags.has && config.ignoreTags.has(node.tag)) {
-          return "";
-        }
+        if (config.forceIndexOneFor && config.forceIndexOneFor.has(node.tag)) return "[1]";
+        if (config.ignoreTags && config.ignoreTags.has(node.tag)) return "";
         return "";
       } else {
-        if (!config.forceIndexOneFor || (config.forceIndexOneFor.size === 0)) {
+        if (!config.forceIndexOneFor || config.forceIndexOneFor.size === 0) {
           return "[1]";
         }
-        if (config.forceIndexOneFor.has && config.forceIndexOneFor.has(node.tag)) {
-          return "[1]";
-        }
-        if (config.ignoreTags && config.ignoreTags.has && config.ignoreTags.has(node.tag)) {
-          return "";
-        }
+        if (config.forceIndexOneFor.has(node.tag)) return "[1]";
+        if (config.ignoreTags && config.ignoreTags.has(node.tag)) return "";
         return "";
       }
     }
@@ -578,7 +543,6 @@ class XPathBuilder {
     return `[${index}]`;
   }
 
-  // Extract namespace declarations from attribute text (returns map prefix->uri)
   extractNamespaceInfo(attrsText) {
     const namespaces = {};
     const xmlnsRegex = /xmlns(?::([^=\s]+))?\s*=\s*(['"])((?:(?!\2)[^\\]|\\.)*?)\2/g;
@@ -591,7 +555,6 @@ class XPathBuilder {
     return namespaces;
   }
 
-  // Build namespace map across document using events
   buildNamespaceMap(events) {
     const namespaceMap = {};
     const stack = [];
@@ -599,40 +562,33 @@ class XPathBuilder {
     for (const event of events) {
       if (event.type === "open") {
         const currentContext = stack.length > 0 ? { ...stack[stack.length - 1].namespaces } : {};
-        if (event.namespaces) {
-          Object.assign(currentContext, event.namespaces);
-        }
+        if (event.namespaces) Object.assign(currentContext, event.namespaces);
         stack.push({ tag: event.tag, namespaces: currentContext });
         namespaceMap[`${event.pos}-${event.tag}`] = currentContext;
       } else if (event.type === "close") {
-        if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) {
-          stack.pop();
-        }
+        if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) stack.pop();
       }
     }
+
     return namespaceMap;
   }
 
   resolveNamespacePrefix(tagName, namespaceContext) {
     if (!tagName.includes(":")) {
-      return { prefix: null, localName: tagName, namespace: namespaceContext?.default };
+      return { prefix: null, localName: tagName, namespace: namespaceContext.default };
     }
     const colonIndex = tagName.indexOf(":");
     const prefix = tagName.substring(0, colonIndex);
     const localName = tagName.substring(colonIndex + 1);
-    const namespace = namespaceContext ? namespaceContext[prefix] : undefined;
+    const namespace = namespaceContext[prefix];
     return { prefix, localName, namespace };
   }
 
-  // Add namespace prefix if configured. For default namespace, returns local-name test.
   addNamespacePrefix(tagName, namespaceContext, config) {
     if (!config.includeNamespaces) return tagName;
 
     const nsInfo = this.resolveNamespacePrefix(tagName, namespaceContext || {});
-
-    if (nsInfo.prefix) {
-      return tagName;
-    }
+    if (nsInfo.prefix) return tagName;
 
     if (config.includeDefaultNamespaces && nsInfo.namespace) {
       for (const [prefix, uri] of Object.entries(namespaceContext || {})) {
@@ -644,71 +600,53 @@ class XPathBuilder {
         return `*[local-name()='${nsInfo.localName}']`;
       }
     }
-
     return tagName;
   }
 
-  // Simple relative generation (//)
   generateRelativeXPath(path, config) {
     if (!path || path.length === 0) return "";
-    const segments = path.map((node, index) =>
-      this.generateXPathSegment(node, index, path.length, config)
-    );
+    const segments = path.map((node, index) => this.generateXPathSegment(node, index, path.length, config));
     return "//" + segments.join("/");
   }
 
-  // Find significant ancestor index using configured attributes
   findSignificantAncestor(stack, config) {
-    if (!config.smartRelativeSignificantAttributes || config.smartRelativeSignificantAttributes.length === 0) {
-      return -1;
-    }
+    if (!config.smartRelativeSignificantAttributes || config.smartRelativeSignificantAttributes.length === 0) return -1;
     for (let i = stack.length - 1; i >= 0; i--) {
       const element = stack[i];
       if (element.attrs) {
         for (const sigAttr of config.smartRelativeSignificantAttributes) {
-          if (element.attrs[sigAttr]) {
-            return i;
-          }
+          if (element.attrs[sigAttr]) return i;
         }
       }
     }
     return -1;
   }
 
-  // Return true if a tag is in the always-include list
-  hasAlwaysIncludeTag(tag, config) {
-    if (!config || !config.smartRelativeAlwaysIncludeTags) return false;
-    return Array.isArray(config.smartRelativeAlwaysIncludeTags) && config.smartRelativeAlwaysIncludeTags.includes(tag);
-  }
-
-  // Smart relative generator honoring:
-  // - smartRelativeIgnoreLastElement (remove leaf before processing)
-  // - smartRelativeDontIgnoreAfter (anchor: include all elements after it)
-  // - smartRelativeAlwaysIncludeTags (always include)
   generateSmartRelativeXPath(path, config) {
     if (!path || path.length === 0) return "";
 
     const prefix = config.smartRelativeNamespacePrefix || "d";
-    const landmarks = [];
 
-    // Work on a copy, respecting ignore-last-element
     let effectivePath = path;
     if (config.smartRelativeIgnoreLastElement && path.length > 1) {
       effectivePath = path.slice(0, -1);
     }
 
-    // Determine anchor index if requested
-    const dontIgnoreAfterTag = config.smartRelativeDontIgnoreAfter || "";
-    let dontIgnoreAfterIndex = -1;
-    if (dontIgnoreAfterTag) {
-      dontIgnoreAfterIndex = effectivePath.findIndex((n) => n.tag === dontIgnoreAfterTag);
-    }
-
-    // Virtual root handling
     let startIndex = 0;
     let hasVirtualRoot = false;
 
-    if (config.smartRelativeVirtualRoot) {
+    if (config.smartRelativeDontIgnoreAfter) {
+      const anchorTag = config.smartRelativeDontIgnoreAfter;
+      const anchorIndex = effectivePath.findIndex((el) => el.tag === anchorTag);
+      if (anchorIndex >= 0) {
+        startIndex = anchorIndex;
+        hasVirtualRoot = false;
+      } else {
+        startIndex = 0;
+      }
+    }
+
+    if (!config.smartRelativeDontIgnoreAfter && config.smartRelativeVirtualRoot) {
       let virtualRootIndex = -1;
       for (let i = 0; i < effectivePath.length; i++) {
         if (effectivePath[i].tag === config.smartRelativeVirtualRoot) {
@@ -719,188 +657,179 @@ class XPathBuilder {
 
       if (virtualRootIndex >= 0) {
         hasVirtualRoot = true;
-        if (config.smartRelativeVirtualRootMode === "include") {
-          // include virtual root as first landmark and start after it
-          landmarks.push({
-            element: effectivePath[virtualRootIndex],
-            isRoot: true,
-            isVirtualRoot: true,
-            isTarget: false
-          });
-          startIndex = virtualRootIndex + 1;
-        } else {
-          startIndex = virtualRootIndex + 1;
-        }
+        startIndex = virtualRootIndex + 1;
       } else {
-        // fallback: use document root
-        if (effectivePath.length > 0) {
+        startIndex = 0;
+      }
+    } else if (!config.smartRelativeDontIgnoreAfter && !config.smartRelativeVirtualRoot) {
+      startIndex = 0;
+    }
+
+    const landmarks = [];
+
+    if (!config.smartRelativeLandmarkMode) {
+      for (let i = startIndex; i < effectivePath.length; i++) {
+        landmarks.push({
+          element: effectivePath[i],
+          isRoot: i === startIndex,
+          isVirtualRoot: false,
+          isTarget: i === effectivePath.length - 1
+        });
+      }
+    } else {
+      if (effectivePath.length > 0) {
+        if (hasVirtualRoot && config.smartRelativeVirtualRoot) {
+          const vri = effectivePath.findIndex(e => e.tag === config.smartRelativeVirtualRoot);
+          if (vri >= 0) {
+            landmarks.push({
+              element: path[vri],
+              isRoot: true,
+              isVirtualRoot: true,
+              isTarget: false
+            });
+          } else {
+            landmarks.push({
+              element: effectivePath[startIndex],
+              isRoot: true,
+              isVirtualRoot: false,
+              isTarget: false
+            });
+          }
+        } else {
           landmarks.push({
-            element: effectivePath[0],
+            element: effectivePath[startIndex] || path[0],
             isRoot: true,
             isVirtualRoot: false,
             isTarget: false
           });
-          startIndex = 1;
         }
       }
-    } else {
-      if (effectivePath.length > 0) {
-        landmarks.push({
-          element: effectivePath[0],
-          isRoot: true,
-          isVirtualRoot: false,
-          isTarget: false
-        });
-        startIndex = 1;
+
+      for (let i = startIndex; i < effectivePath.length; i++) {
+        const element = effectivePath[i];
+
+        const isAlwaysInclude = Array.isArray(config.smartRelativeAlwaysIncludeTags) &&
+          config.smartRelativeAlwaysIncludeTags.includes(element.tag);
+
+        if (isAlwaysInclude || this.hasSignificantAttributes(element, config) || this.hasIdentifyingChildren(element, config)) {
+          landmarks.push({
+            element,
+            isRoot: false,
+            isVirtualRoot: false,
+            isTarget: false
+          });
+        }
       }
-    }
 
-    // Collect landmarks:
-    for (let i = startIndex; i < effectivePath.length - 1; i++) {
-      const element = effectivePath[i];
-
-      const isAfterAnchor = (dontIgnoreAfterIndex >= 0 && i >= dontIgnoreAfterIndex);
-      const alwaysInclude = this.hasAlwaysIncludeTag(element.tag, config);
-
-      if (isAfterAnchor || alwaysInclude || this.hasSignificantAttributes(element, config) || this.hasIdentifyingChildren(element, config)) {
+      if (effectivePath.length > 0) {
+        const lastIdx = effectivePath.length - 1;
         landmarks.push({
-          element: element,
+          element: effectivePath[lastIdx],
           isRoot: false,
           isVirtualRoot: false,
-          isTarget: false
+          isTarget: true
         });
       }
-    }
-
-    // Add target element if present in effectivePath (note: if ignore-last-element was set, the original leaf is removed)
-    if (effectivePath.length > startIndex) {
-      const targetElement = effectivePath[effectivePath.length - 1];
-      landmarks.push({
-        element: targetElement,
-        isRoot: false,
-        isVirtualRoot: false,
-        isTarget: true
-      });
-    } else if (effectivePath.length > 0 && startIndex === effectivePath.length) {
-      if (landmarks.length > 0) landmarks[landmarks.length - 1].isTarget = true;
     }
 
     if (config.smartRelativeSingleLine) {
-      return this.generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot);
+      return this.generateSingleLineSmartXPath(landmarks, config, prefix, !!config.smartRelativeVirtualRoot);
     } else {
-      return this.generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot);
+      return this.generateMultiLineSmartXPath(landmarks, config, prefix, !!config.smartRelativeVirtualRoot);
     }
   }
 
-  // Single-line formatting for smart relative mode
   generateSingleLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
-    const segments = [];
+    if (!landmarks || landmarks.length === 0) return "";
+    const parts = [];
 
-    for (const landmark of landmarks) {
-      const element = landmark.element;
-      let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
+    for (const lm of landmarks) {
+      const element = lm.element;
+      let name = prefix ? `${prefix}:${element.tag}` : element.tag;
+      let seg = name;
 
-      if (config.useAttributeBasedIndexing && element.attrs && config.attributeBasedIndexingAttribute && element.attrs[config.attributeBasedIndexingAttribute]) {
+      if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute && element.attrs && element.attrs[config.attributeBasedIndexingAttribute]) {
         const attrName = config.attributeBasedIndexingAttribute;
         const attrValue = element.attrs[attrName];
-        const escapedValue = this.escapeAttributeValue(attrValue);
-        segment += `[@${attrName}='${escapedValue}']`;
+        seg += `[@${attrName}='${this.escapeAttributeValue(attrValue)}']`;
         const index = element.idx || element.index;
         if (index > 1 || (index === 1 && !config.skipSingleIndex)) {
-          segment += `[${index}]`;
+          seg += `[${index}]`;
         }
       } else {
         const identifier = this.getElementIdentifier(element, config, prefix);
-        if (identifier) {
-          segment += identifier;
-        } else if (landmark.isTarget) {
-          segment += this.generateIndex(element, true, config);
-        }
+        if (identifier) seg += identifier;
+        else if (lm.isTarget) seg += this.generateIndex(element, true, config);
       }
 
-      segments.push(segment);
+      parts.push(seg);
     }
 
     if (hasVirtualRoot) {
-      return "//" + segments.join("//");
+      return "//" + parts.join("//");
     } else {
-      if (segments.length === 1) {
-        return "/" + segments[0];
-      } else {
-        return "/" + segments.join("/");
-      }
+      if (parts.length === 1) return "/" + parts[0];
+      if (config.useRelativePath) return "//" + parts.join("/");
+      return "/" + parts.join("/");
     }
   }
 
-  // Multi-line formatting for smart relative mode
   generateMultiLineSmartXPath(landmarks, config, prefix, hasVirtualRoot = false) {
-    let result = "";
+    if (!landmarks || landmarks.length === 0) return "";
+
     const indent = " ".repeat(config.smartRelativeIndentSize || 4);
+    let result = "";
 
     for (let i = 0; i < landmarks.length; i++) {
-      const landmark = landmarks[i];
-      const element = landmark.element;
-      let segment = prefix ? `${prefix}:${element.tag}` : element.tag;
+      const lm = landmarks[i];
+      const element = lm.element;
+      let name = prefix ? `${prefix}:${element.tag}` : element.tag;
+      let seg = name;
 
-      if (config.useAttributeBasedIndexing && element.attrs && config.attributeBasedIndexingAttribute && element.attrs[config.attributeBasedIndexingAttribute]) {
+      if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute && element.attrs && element.attrs[config.attributeBasedIndexingAttribute]) {
         const attrName = config.attributeBasedIndexingAttribute;
         const attrValue = element.attrs[attrName];
-        const escapedValue = this.escapeAttributeValue(attrValue);
-        segment += `[@${attrName}='${escapedValue}']`;
+        seg += `[@${attrName}='${this.escapeAttributeValue(attrValue)}']`;
         const index = element.idx || element.index;
         if (index > 1 || (index === 1 && !config.skipSingleIndex)) {
-          segment += `[${index}]`;
+          seg += `[${index}]`;
         }
       } else {
         const identifier = this.getElementIdentifier(element, config, prefix);
-        if (identifier) {
-          segment += identifier;
-        } else if (landmark.isTarget) {
-          segment += this.generateIndex(element, true, config);
-        }
+        if (identifier) seg += identifier;
+        else if (lm.isTarget) seg += this.generateIndex(element, true, config);
       }
 
       if (hasVirtualRoot) {
-        if (i === 0) {
-          result += `//${segment}`;
-        } else {
-          result += `\n${indent}//${segment}`;
-        }
+        if (i === 0) result += `//${seg}`;
+        else result += `\n${indent}//${seg}`;
       } else {
-        if (i === 0) {
-          result += `/${segment}`;
-        } else {
-          result += `/${segment}`;
-        }
+        if (i === 0) result += `/${seg}`;
+        else result += `/${seg}`;
       }
     }
 
     return result;
   }
 
-  // Return attribute-based identifier or identifying-child pseudo-attribute
   getElementIdentifier(element, config, prefix) {
     const sigAttr = this.findSignificantAttribute(element, config);
     if (sigAttr) {
       const escapedValue = this.escapeAttributeValue(sigAttr.value);
       let identifier = `[@${sigAttr.name}='${escapedValue}']`;
-
       if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute === sigAttr.name) {
         const index = element.idx || element.index;
-        if (index && index > 1) {
-          identifier += `[${index}]`;
-        } else if (index === 1 && !config.skipSingleIndex) {
-          identifier += `[1]`;
-        }
+        if (index && index > 1) identifier += `[${index}]`;
+        else if (index === 1 && !config.skipSingleIndex) identifier += `[1]`;
       }
-
       return identifier;
     }
 
     if (element.identifyingChildren && element.identifyingChildren.length > 0) {
       const child = element.identifyingChildren[0];
       const escapedValue = this.escapeAttributeValue(child.value);
-      return `[@${prefix}:${child.name}='${escapedValue}']`;
+      if (prefix) return `[@${prefix}:${child.name}='${escapedValue}']`;
+      return `[@${child.name}='${escapedValue}']`;
     }
 
     return null;
