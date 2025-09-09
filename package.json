@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.4",
+  "version": "3.5.5",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -467,7 +467,9 @@
         },
         "xmlXpath.smartRelativeSignificantAttributes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Attributes that make an element significant for smart relative XPath"
         },
@@ -483,7 +485,9 @@
         },
         "xmlXpath.smartRelativeIdentifyingChildren": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Child elements that can identify their parent"
         },
@@ -517,7 +521,9 @@
         },
         "xmlXpath.smartRelativeAlwaysIncludeTags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Tags that should always be treated as landmarks in Smart Relative mode. These can be added quickly with the command 'Add Always-Include Tag From Cursor'."
         },
@@ -528,13 +534,17 @@
         },
         "xmlXpath.relativeMustIncludeTags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Tags that must be included when generating relative XPath (landmarks)."
         },
         "xmlXpath.relativeMustIgnoreTags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Tags to always ignore in relative XPath generation."
         },
