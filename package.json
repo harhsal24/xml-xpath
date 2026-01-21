@@ -6,8 +6,9 @@
   "engines": {
     "vscode": "^1.50.0"
   },
-  "categories": [
-    "Other"
+  "categories": ["Xml xpath ",
+     "xpath","x-path","xpath finder","xpath extractor",
+    "Programming Languages"
   ],
   "activationEvents": [
     "onLanguage:xml",
