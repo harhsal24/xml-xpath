@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.5",
+  "version": "3.5.05",
   "engines": {
     "vscode": "^1.50.0"
   },
@@ -438,7 +438,7 @@
         "xmlXpath.attributeBasedIndexingAttribute": {
           "type": "string",
           "default": "",
-          "description": "The attribute to use for attribute-based indexing (e.g., 'ValuationType'). If empty, uses the first preferred attribute."
+          "description": "The attribute to use for attribute-based indexing. If empty, uses the first preferred attribute."
         },
         "xmlXpath.useRelativePath": {
           "type": "boolean",
@@ -504,7 +504,7 @@
         "xmlXpath.smartRelativeVirtualRoot": {
           "type": "string",
           "default": "",
-          "description": "Virtual root element to start smart relative XPath from (e.g., 'PROPERTY', 'VALUATION'). Empty means use actual document root."
+          "description": "Virtual root element to start smart relative XPath from. Empty means use actual document root."
         },
         "xmlXpath.smartRelativeVirtualRootMode": {
           "type": "string",
