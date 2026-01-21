@@ -2,12 +2,11 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.05",
+  "version": "3.5.6",
   "engines": {
     "vscode": "^1.50.0"
   },
-  "categories": ["Xml xpath ",
-     "xpath","x-path","xpath finder","xpath extractor","copy xpath","copy xpath",
+  "categories": ["Other",
     "Programming Languages"
   ],
   "activationEvents": [
