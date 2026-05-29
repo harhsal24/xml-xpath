@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <parent id="p1">
+    <child type="a">One</child>
+    <child type="a">Two</child>
+  </parent>
+  <parent id="p2">
+    <child type="a">Three</child>
+  </parent>
+
+  <valuation-test>
+    <item valuationType="A" id="x">Item 1</item>
+    <item valuationType="A" id="y">Item 2</item>
+    <item valuationType="A" id="x">Item 3</item>
+    <item valuationType="A">Item 4</item>
+    <item valuationType="A">Item 5</item>
+    <item id="x">Item 6</item>
+    <item id="x">Item 7</item>
+  </valuation-test>
+
+  <default-ns-test xmlns="http://www.example.com/default-ns">
+    <item>Namespace item</item>
+  </default-ns-test>
+</root>

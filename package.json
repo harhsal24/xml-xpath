@@ -2,11 +2,12 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.6",
+  "version": "3.5.10",
   "engines": {
     "vscode": "^1.50.0"
   },
-  "categories": ["Other",
+  "categories": [
+    "Other",
     "Programming Languages"
   ],
   "activationEvents": [
@@ -29,31 +30,15 @@
     "onCommand:xmlXpath.toggleUseRelativePath",
     "onCommand:xmlXpath.toggleIncludeNamespaces",
     "onCommand:xmlXpath.toggleIncludeDefaultNamespaces",
-    "onCommand:xmlXpath.addAlwaysIncludeTagFromCursor",
-    "onCommand:xmlXpath.clearAlwaysIncludeTags",
-    "onCommand:xmlXpath.setDontIgnoreAfterFromCursor",
-    "onCommand:xmlXpath.clearDontIgnoreAfter",
-    "onCommand:xmlXpath.toggleUseSmartRelativePath",
-    "onCommand:xmlXpath.toggleSmartRelativeLandmarkMode",
-    "onCommand:xmlXpath.setSmartRelativeNamespacePrefix",
-    "onCommand:xmlXpath.setSmartRelativeSignificantAttributes",
-    "onCommand:xmlXpath.toggleSmartRelativeIgnoreLastElement",
-    "onCommand:xmlXpath.toggleSmartRelativeSingleLine",
-    "onCommand:xmlXpath.setSmartRelativeVirtualRoot",
-    "onCommand:xmlXpath.toggleSmartRelativeVirtualRootMode",
-    "onCommand:xmlXpath.clearSmartRelativeVirtualRoot",
     "onCommand:xmlXpath.setForceIndexOneFor",
     "onCommand:xmlXpath.setExceptionsToIndexOneForcing",
     "onCommand:xmlXpath.toggleAttributeBasedIndexing",
     "onCommand:xmlXpath.setAttributeBasedIndexingAttribute",
-    "onCommand:xmlXpath.addIdentifyingChildFromCursor",
-    "onCommand:xmlXpath.removeIdentifyingChildFromCursor",
-    "onCommand:xmlXpath.clearIdentifyingChildren",
-    "onCommand:xmlXpath.listIdentifyingChildren",
     "onCommand:xmlXpath.setRelativeMustIncludeTags",
     "onCommand:xmlXpath.setRelativeMustIgnoreTags",
     "onCommand:xmlXpath.setRelativeDontIgnoreAfter",
-    "onCommand:xmlXpath.clearRelativeDontIgnoreAfter"
+    "onCommand:xmlXpath.clearRelativeDontIgnoreAfter",
+    "onCommand:xmlXpath.recalculateXPath"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -168,91 +153,7 @@
         "title": "XML XPath: Toggle Include Default Namespaces",
         "category": "XML XPath"
       },
-      {
-        "command": "xmlXpath.toggleUseSmartRelativePath",
-        "title": "XML XPath: Toggle Smart Relative Path",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.toggleSmartRelativeLandmarkMode",
-        "title": "XML XPath: Toggle Smart Relative Landmark Mode",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setSmartRelativeNamespacePrefix",
-        "title": "XML XPath: Set Smart Relative Namespace Prefix",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setSmartRelativeSignificantAttributes",
-        "title": "XML XPath: Set Smart Relative Significant Attributes",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.toggleSmartRelativeIgnoreLastElement",
-        "title": "XML XPath: Toggle Ignore Last Element in Smart Relative Path",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.toggleSmartRelativeSingleLine",
-        "title": "XML XPath: Toggle Smart Relative Single Line",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setSmartRelativeVirtualRoot",
-        "title": "XML XPath: Set Smart Relative Virtual Root",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.toggleSmartRelativeVirtualRootMode",
-        "title": "XML XPath: Toggle Virtual Root Mode (Include/Exclude)",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.clearSmartRelativeVirtualRoot",
-        "title": "XML XPath: Clear Virtual Root",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.addAlwaysIncludeTagFromCursor",
-        "title": "XML XPath: Add Always-Include Tag From Cursor",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.clearAlwaysIncludeTags",
-        "title": "XML XPath: Clear Always-Include Tags",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setDontIgnoreAfterFromCursor",
-        "title": "XML XPath: Set 'Don't Ignore After' Anchor From Cursor",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.clearDontIgnoreAfter",
-        "title": "XML XPath: Clear 'Don't Ignore After' Anchor",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.addIdentifyingChildFromCursor",
-        "title": "XML XPath: Add Smart-Relative Identifying Child (from cursor)",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.removeIdentifyingChildFromCursor",
-        "title": "XML XPath: Remove Smart-Relative Identifying Child (from cursor)",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.clearIdentifyingChildren",
-        "title": "XML XPath: Clear Smart-Relative Identifying Children",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.listIdentifyingChildren",
-        "title": "XML XPath: List Smart-Relative Identifying Children",
-        "category": "XML XPath"
-      },
+
       {
         "command": "xmlXpath.setRelativeMustIncludeTags",
         "title": "XML XPath: Set Relative Must-Include Tags",
@@ -272,6 +173,11 @@
         "command": "xmlXpath.clearRelativeDontIgnoreAfter",
         "title": "XML XPath: Clear Relative 'Don't Ignore After' Anchor",
         "category": "XML XPath"
+      },
+      {
+        "command": "xmlXpath.recalculateXPath",
+        "title": "XML XPath: Recalculate XPath from Cursor",
+        "category": "XML XPath"
       }
     ],
     "keybindings": [
@@ -285,11 +191,7 @@
         "command": "xmlXpath.searchWithXPath",
         "when": "editorTextFocus && editorLangId == xml"
       },
-      {
-        "key": "ctrl+shift+x",
-        "command": "xmlXpath.toggleUseSmartRelativePath",
-        "when": "editorLangId == xml"
-      },
+
       {
         "key": "alt+shift+x",
         "command": "xmlXpath.searchWithXPath",
@@ -316,21 +218,6 @@
         {
           "command": "xmlXpath.toggleUseXlinkLabelIndex",
           "when": "editorTextFocus",
-          "group": "xmlXpath"
-        },
-        {
-          "command": "xmlXpath.addAlwaysIncludeTagFromCursor",
-          "when": "editorLangId == xml",
-          "group": "xmlXpath"
-        },
-        {
-          "command": "xmlXpath.addIdentifyingChildFromCursor",
-          "when": "editorLangId == xml",
-          "group": "xmlXpath"
-        },
-        {
-          "command": "xmlXpath.setDontIgnoreAfterFromCursor",
-          "when": "editorLangId == xml",
           "group": "xmlXpath"
         }
       ]
@@ -392,7 +279,7 @@
         },
         "xmlXpath.useParentScopedIndices": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "If true, reset child-counters per parent; otherwise use global-depth counters."
         },
         "xmlXpath.ignoreParentSegment": {
@@ -436,9 +323,15 @@
           "description": "When enabled, elements are indexed based on their attribute values. Elements with same tag but different attributes get separate index sequences."
         },
         "xmlXpath.attributeBasedIndexingAttribute": {
-          "type": "string",
+          "type": [
+            "string",
+            "array"
+          ],
+          "items": {
+            "type": "string"
+          },
           "default": "",
-          "description": "The attribute to use for attribute-based indexing. If empty, uses the first preferred attribute."
+          "description": "The attribute or array of attributes to use for attribute-based indexing. If empty, uses preferred attributes."
         },
         "xmlXpath.useRelativePath": {
           "type": "boolean",
@@ -455,83 +348,7 @@
           "default": false,
           "description": "Include default namespace handling in XPath"
         },
-        "xmlXpath.useSmartRelativePath": {
-          "type": "boolean",
-          "default": false,
-          "description": "Generate smart relative XPath starting from elements with significant attributes"
-        },
-        "xmlXpath.smartRelativeNamespacePrefix": {
-          "type": "string",
-          "default": "d",
-          "description": "Namespace prefix to use in smart relative XPath (e.g., 'd' for 'd:ELEMENT')"
-        },
-        "xmlXpath.smartRelativeSignificantAttributes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Attributes that make an element significant for smart relative XPath"
-        },
-        "xmlXpath.smartRelativeLandmarkMode": {
-          "type": "boolean",
-          "default": true,
-          "description": "Use landmark mode (show only root + significant elements + target)"
-        },
-        "xmlXpath.smartRelativeIndentSize": {
-          "type": "number",
-          "default": 4,
-          "description": "Number of spaces for indentation in smart relative XPath"
-        },
-        "xmlXpath.smartRelativeIdentifyingChildren": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Child elements that can identify their parent"
-        },
-        "xmlXpath.smartRelativeIgnoreLastElement": {
-          "type": "boolean",
-          "default": false,
-          "description": "When enabled, excludes the target element from smart relative XPath, showing only the path to its container"
-        },
-        "xmlXpath.smartRelativeSingleLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "Generate smart relative XPath as single line instead of multi-line format"
-        },
-        "xmlXpath.smartRelativeVirtualRoot": {
-          "type": "string",
-          "default": "",
-          "description": "Virtual root element to start smart relative XPath from. Empty means use actual document root."
-        },
-        "xmlXpath.smartRelativeVirtualRootMode": {
-          "type": "string",
-          "enum": [
-            "include",
-            "exclude"
-          ],
-          "default": "include",
-          "enumDescriptions": [
-            "Include the virtual root element in the XPath",
-            "Exclude the virtual root element, start from its children"
-          ],
-          "description": "Whether to include or exclude the virtual root element in the generated XPath"
-        },
-        "xmlXpath.smartRelativeAlwaysIncludeTags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Tags that should always be treated as landmarks in Smart Relative mode. These can be added quickly with the command 'Add Always-Include Tag From Cursor'."
-        },
-        "xmlXpath.smartRelativeDontIgnoreAfter": {
-          "type": "string",
-          "default": "",
-          "description": "Anchor element tag name: when set, Smart Relative mode will NOT ignore any elements that appear after this anchor element in the ancestor chain."
-        },
+
         "xmlXpath.relativeMustIncludeTags": {
           "type": "array",
           "items": {
@@ -553,18 +370,25 @@
           "default": "",
           "description": "Anchor tag name for relative mode: when set, elements after this ancestor will not be removed/ignored."
         },
-        "xmlXpath.relativeNamespacePrefix": {
+        "xmlXpath.defaultNamespacePrefix": {
           "type": "string",
           "default": "d",
-          "description": "Namespace prefix to use in relative XPath when includeNamespaces is enabled."
+          "description": "Namespace prefix to use for elements in default namespaces (when includeDefaultNamespaces is enabled)."
         }
       }
     }
+  },
+  "scripts": {
+    "test": "node test/run-integration-tests.js",
+    "test-e2e": "node test/playwright-test.js"
   },
   "dependencies": {
     "fast-xml-parser": "^4.5.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "vscode": "^1.1.37",
     "vscode-test": "^1.4.0"
   }

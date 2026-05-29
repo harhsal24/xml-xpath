@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<company>
+  <department name="Engineering">
+    <team name="Platform">
+      <service id="svc-1">
+        <name>Auth</name>
+      </service>
+      <service id="svc-2">
+        <name>Profile</name>
+      </service>
+    </team>
+  </department>
+</company>

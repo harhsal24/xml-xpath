@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CompanyData xmlns:dept="http://company.com/departments" xmlns:xlink="http://www.w3.org/1999/xlink">
+    
+    <!-- Scenario 1: Basic Elements with IDs and Attributes -->
+    <Employees>
+        <Employee id="emp001" department="Engineering">
+            <Name>John Doe</Name>
+            <Position>Senior Developer</Position>
+        </Employee>
+        <Employee id="emp002" department="Marketing">
+            <Name>Jane Smith</Name>
+            <Position>Marketing Manager</Position>
+        </Employee>
+        <Employee id="emp003" department="Engineering">
+            <Name>Bob Johnson</Name>
+            <Position>Junior Developer</Position>
+        </Employee>
+    </Employees>
+
+    <!-- Scenario 2: Deeply Nested Same-Named Elements -->
+    <Organization>
+        <Division name="Technology">
+            <Division name="Software">
+                <Division name="Web">
+                    <Team>Frontend</Team>
+                    <Team>Backend</Team>
+                </Division>
+                <Division name="Mobile">
+                    <Team>iOS</Team>
+                    <Team>Android</Team>
+                </Division>
+            </Division>
+            <Division name="Hardware">
+                <Team>Embedded Systems</Team>
+            </Division>
+        </Division>
+        <Division name="Operations">
+            <Team>DevOps</Team>
+        </Division>
+    </Organization>
+
+    <!-- Scenario 3: Namespaced Elements -->
+    <Departments>
+        <dept:Engineering>
+            <dept:Manager>Alice Cooper</dept:Manager>
+            <dept:Budget currency="USD">1000000</dept:Budget>
+        </dept:Engineering>
+        <dept:Marketing>
+            <dept:Manager>Charlie Brown</dept:Manager>
+            <dept:Budget currency="EUR">500000</dept:Budget>
+        </dept:Marketing>
+    </Departments>
+
+    <!-- Scenario 4: xlink:label Usage -->
+    <Projects>
+        <Project xlink:label="project_101">
+            <Name>AI Platform</Name>
+            <Status>Active</Status>
+        </Project>
+        <Project xlink:label="project_205">
+            <Name>Mobile App</Name>
+            <Status>Planning</Status>
+        </Project>
+        <Project xlink:lable="project_303"> <!-- Intentional typo to test handling -->
+            <Name>Data Pipeline</Name>
+            <Status>Active</Status>
+        </Project>
+        <Project> <!-- No xlink:label -->
+            <Name>Legacy System</Name>
+            <Status>Maintenance</Status>
+        </Project>
+    </Projects>
+
+    <!-- Scenario 5: Mixed Siblings for Index Testing -->
+    <Reports>
+        <Report type="monthly">
+            <Title>January Report</Title>
+            <Section>Summary</Section>
+            <Section>Details</Section>
+            <Attachment/>
+        </Report>
+        <Report type="quarterly">
+            <Title>Q1 Report</Title>
+            <Section>Overview</Section>
+            <Section>Financials</Section>
+            <Section>Projections</Section>
+        </Report>
+        <Report type="annual">
+            <Title>2023 Annual Report</Title>
+            <Section>Executive Summary</Section>
+        </Report>
+    </Reports>
+
+    <!-- Scenario 6: CDATA and Special Content -->
+    <Documentation>
+        <CodeSample language="javascript">
+            <![CDATA[
+                function processXML(data) {
+                    // Parse XML with special chars < > &
+                    if (data && data.length > 0) {
+                        return data.replace(/</g, "&lt;");
+                    }
+                }
+            ]]>
+        </CodeSample>
+        <Note priority="high">
+            <Content><![CDATA[Remember: Use &amp; for ampersand and check <data> tags]]></Content>
+        </Note>
+    </Documentation>
+
+    <!-- Scenario 7: Self-Closing and Empty Elements -->
+    <Configuration>
+        <Setting name="debug" value="true"/>
+        <Setting name="timeout" value="30"/>
+        <EmptyConfig></EmptyConfig>
+        <VoidConfig/>
+    </Configuration>
+
+    <!-- Scenario 8: Mixed Content with Inline Elements -->
+    <Announcements>
+        <Announcement id="ann001">
+            <Text>Welcome to our <strong>new</strong> platform with <em>amazing</em> features!</Text>
+            <Author>System</Author>
+        </Announcement>
+        <Announcement id="ann002">
+            <Text>Check out the <a href="/docs">documentation</a> for more info.</Text>
+            <Author>Admin</Author>
+        </Announcement>
+    </Announcements>
+
+    <!-- Scenario 9: Complex Attribute Combinations -->
+    <Products>
+        <Product sku="PROD-001" category="electronics" status="active">
+            <Name>Laptop Pro</Name>
+            <Price currency="USD">1299.99</Price>
+        </Product>
+        <Product sku="PROD-002" category="electronics" status="discontinued">
+            <Name>Old Phone</Name>
+            <Price currency="USD">199.99</Price>
+        </Product>
+        <Product sku="PROD-003" category="furniture" status="active">
+            <Name>Ergonomic Chair</Name>
+            <Price currency="EUR">450.00</Price>
+        </Product>
+    </Products>
+
+</CompanyData>

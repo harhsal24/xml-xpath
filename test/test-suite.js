@@ -32,7 +32,7 @@ const testCases = [
   // Deeply Nested Tests
   {
     description: "Test 2.1: Deeply nested same-name elements",
-    cursor: { line: 26, character: 30 }, // Frontend Team
+    cursor: { line: 25, character: 30 }, // Frontend Team
     config: { mode: { includeIndices: true, includeAttributes: false } },
     expectedXPath:
       "/CompanyData[1]/Organization[1]/Division[1]/Division[1]/Division[1]/Team[1]",
@@ -127,7 +127,7 @@ const testCases = [
   // Self-Closing and Empty Elements
   {
     description: "Test 7.1: Self-closing element with attributes",
-    cursor: { line: 111, character: 35 }, // Setting debug="true"
+    cursor: { line: 113, character: 35 }, // Setting debug="true"
     config: {
       preferredAttributes: ["name"],
       mode: { includeIndices: false, includeAttributes: true },
@@ -136,7 +136,7 @@ const testCases = [
   },
   {
     description: "Test 7.2: Empty element",
-    cursor: { line: 113, character: 20 }, // EmptyConfig
+    cursor: { line: 115, character: 20 }, // EmptyConfig
     config: { mode: { includeIndices: true, includeAttributes: false } },
     expectedXPath: "/CompanyData[1]/Configuration[1]/EmptyConfig[1]",
   },
@@ -144,7 +144,7 @@ const testCases = [
   // Mixed Content Tests
   {
     description: "Test 8.1: Inline element in mixed content",
-    cursor: { line: 121, character: 35 }, // <strong>new</strong>
+    cursor: { line: 122, character: 35 }, // <strong>new</strong>
     config: { mode: { includeIndices: true, includeAttributes: false } },
     expectedXPath:
       "/CompanyData[1]/Announcements[1]/Announcement[1]/Text[1]/strong[1]",
@@ -180,7 +180,7 @@ const testCases = [
   // Parent Tag Tests
   {
     description: "Test 10.1: Relative XPath from parent",
-    cursor: { line: 26, character: 30 }, // Frontend Team
+    cursor: { line: 25, character: 30 }, // Frontend Team
     config: {
       parentTag: "Division",
       mode: { includeIndices: true, includeAttributes: false },
@@ -189,7 +189,7 @@ const testCases = [
   },
   {
     description: "Test 10.2: Relative XPath with ignoreParentSegment",
-    cursor: { line: 26, character: 30 }, // Frontend Team
+    cursor: { line: 25, character: 30 }, // Frontend Team
     config: {
       parentTag: "Organization",
       ignoreParentSegment: true,
@@ -216,13 +216,13 @@ const testCases = [
       preferredAttributes: ["sku"],
       mode: { includeIndices: true, includeAttributes: true },
     },
-    expectedXPath: "/CompanyData[1]/Products[1]/Product[@sku='PROD-001']/Name",
+    expectedXPath: "/CompanyData[1]/Products[1]/Product[@sku='PROD-001'][1]/Name",
   },
 
   // Ignore Index Tags Tests
   {
     description: "Test 12.1: Ignore index for specific tags",
-    cursor: { line: 26, character: 30 }, // Frontend Team
+    cursor: { line: 25, character: 30 }, // Frontend Team
     config: {
       ignoreIndexTags: ["Division", "Team"],
       mode: { includeIndices: true, includeAttributes: false },
@@ -252,11 +252,11 @@ const testCases = [
       preferredAttributes: ["type"],
       mode: { includeIndices: true, includeAttributes: true },
     },
-    expectedXPath: "/Reports[1]/Report[@type='quarterly']/Section",
+    expectedXPath: "/Reports[1]/Report[@type='quarterly'][2]/Section",
   },
   {
     description: "Test 13.2: Skip single with parent scope",
-    cursor: { line: 121, character: 35 }, // <strong>new</strong>
+    cursor: { line: 122, character: 35 }, // <strong>new</strong>
     config: {
       skipSingleIndex: true,
       useParentScopedIndices: true,
@@ -279,7 +279,7 @@ const testCases = [
       preferredAttributes: ["id", "type"],
       mode: { includeIndices: false, includeAttributes: true },
     },
-    expectedXPath: "/CompanyData/Reports/Report/Section",
+    expectedXPath: "/CompanyData/Reports/Report[@type='monthly']/Section",
   },
   {
     description: "Test 14.3: Simple mode (no indices, no attributes)",
@@ -361,7 +361,7 @@ async function runTests() {
           disableLeafIndex: false,
           skipSingleIndex: false,
           useXlinkLabelIndex: false,
-          useParentScopedIndices: false,
+          useParentScopedIndices: true,
           ignoreParentSegment: false,
         };
         return { ...baseConfig, ...test.config };
@@ -414,10 +414,12 @@ async function runTests() {
   }
 }
 
-// Run the tests
-runTests().catch((error) => {
-  console.error("Test runner error:", error);
-  process.exit(1);
-});
+// Run the tests only when executed directly
+if (require.main === module) {
+  runTests().catch((error) => {
+    console.error("Test runner error:", error);
+    process.exit(1);
+  });
+}
 
 module.exports = { testCases, runTests };

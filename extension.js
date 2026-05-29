@@ -2,46 +2,17 @@
 
 const vscode = require("vscode");
 const XPathBuilder = require("./XPathBuilder.js");
+const configManager = require("./lib/configManager.js");
+const xpathSearcher = require("./lib/xpathSearcher.js");
 
-const CONFIG_SECTION = "xmlXpath";
+const CONFIG_SECTION = configManager.CONFIG_SECTION;
 let statusBarItem;
 
 const xpathBuilder = new XPathBuilder();
 
-// Inject VS Code-backed configuration loader into the builder (same pattern you used)
+// Inject VS Code-backed configuration loader into the builder
 xpathBuilder.loadConfiguration = function () {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-
-  return {
-    parentTag: cfg.get("parentTag", null),
-    mode: cfg.get("mode", { includeIndices: true, includeAttributes: true }),
-    preferredAttributes: cfg.get("preferredAttributes", []),
-    ignoreTags: new Set(cfg.get("ignoreIndexTags", [])),
-    disableLeafIndex: cfg.get("disableLeafIndex", false),
-    skipSingleIndex: cfg.get("skipSingleIndex", false),
-    useXlinkLabelIndex: cfg.get("useXlinkLabelIndex", false),
-    useParentScopedIndices: cfg.get("useParentScopedIndices", false),
-    ignoreParentSegment: cfg.get("ignoreParentSegment", false),
-    predicateTemplate: cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']"),
-    xlinkLabelPattern: cfg.get("xlinkLabelPattern", { type: "any", pattern: "" }),
-    forceIndexOneFor: new Set(cfg.get("forceIndexOneFor", [])),
-    exceptionsToIndexOneForcing: new Set(cfg.get("exceptionsToIndexOneForcing", [])),
-    useAttributeBasedIndexing: cfg.get("useAttributeBasedIndexing", false),
-    attributeBasedIndexingAttribute: cfg.get("attributeBasedIndexingAttribute", ""),
-    useRelativePath: cfg.get("useRelativePath", false),
-    includeNamespaces: cfg.get("includeNamespaces", false),
-    includeDefaultNamespaces: cfg.get("includeDefaultNamespaces", false),
-
-    // Smart relative
-    useSmartRelativePath: cfg.get("useSmartRelativePath", false),
-    smartRelativeNamespacePrefix: cfg.get("smartRelativeNamespacePrefix", "d"),
-    smartRelativeSignificantAttributes: cfg.get("smartRelativeSignificantAttributes", []),
-    smartRelativeIdentifyingChildren: cfg.get("smartRelativeIdentifyingChildren", []),
-    smartRelativeIgnoreLastElement: cfg.get("smartRelativeIgnoreLastElement", false),
-    smartRelativeSingleLine: cfg.get("smartRelativeSingleLine", false),
-    smartRelativeVirtualRoot: cfg.get("smartRelativeVirtualRoot", ""),
-    smartRelativeVirtualRootMode: cfg.get("smartRelativeVirtualRootMode", "include"),
-  };
+  return configManager.loadVSCodeConfiguration(vscode);
 };
 
 // ------------------------ Utilities ------------------------
@@ -62,347 +33,6 @@ function debounce(func, wait) {
 function truncate(s, n = 120) {
   if (!s) return "";
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
-
-// ------------------------ XPath parsing for search ------------------------
-// This parser is intentionally conservative: it supports typical predicates:
-// numeric positions [1], attribute equality [@id='x'], contains(@attr,'x'), text()="x", position(), last()
-function parseXPath(xpath) {
-  if (!xpath || typeof xpath !== "string") return [];
-
-  // Normalize: remove leading '//' or leading single slash. We treat XPath as path segments.
-  let normalized = xpath.trim();
-  while (normalized.startsWith("//")) normalized = normalized.substring(2);
-  if (normalized.startsWith("/")) normalized = normalized.substring(1);
-
-  if (!normalized) return [];
-
-  const rawParts = normalized.split("/").filter((p) => p && p.trim().length > 0);
-  const segments = [];
-
-  for (const rawPart of rawParts) {
-    // split tag and predicate(s)
-    const bracketIndex = rawPart.indexOf("[");
-    let tagName = bracketIndex === -1 ? rawPart : rawPart.substring(0, bracketIndex);
-    let predicatesPart = bracketIndex === -1 ? "" : rawPart.substring(bracketIndex);
-
-    tagName = tagName.trim();
-
-    const seg = { tagName, predicates: [] };
-
-    if (predicatesPart) {
-      const predicateRegex = /\[([^\]]+)\]/g;
-      let m;
-      while ((m = predicateRegex.exec(predicatesPart)) !== null) {
-        const pred = m[1].trim();
-
-        // positional: number
-        if (/^\d+$/.test(pred)) {
-          seg.predicates.push({ type: "position", value: parseInt(pred, 10) });
-          continue;
-        }
-
-        // position()=n
-        const posFunc = pred.match(/position\(\)\s*=\s*(\d+)/);
-        if (posFunc) {
-          seg.predicates.push({ type: "position", value: parseInt(posFunc[1], 10) });
-          continue;
-        }
-
-        // last()
-        if (/^last\(\)\s*$/.test(pred)) {
-          seg.predicates.push({ type: "last" });
-          continue;
-        }
-
-        // attribute equality: @attr='value' or attr='value'
-        const attrEq = pred.match(/^@?([^=\s]+)\s*=\s*['"]([^'"]*)['"]$/);
-        if (attrEq) {
-          seg.predicates.push({ type: "attribute", name: attrEq[1], value: attrEq[2] });
-          continue;
-        }
-
-        // contains(@attr,'value')
-        const containsMatch = pred.match(/contains\s*\(\s*@([^,)\s]+)\s*,\s*['"]([^'"]+)['"]\s*\)/);
-        if (containsMatch) {
-          seg.predicates.push({ type: "contains", target: containsMatch[1], value: containsMatch[2] });
-          continue;
-        }
-
-        // text()="..."
-        const textMatch = pred.match(/text\(\)\s*=\s*['"]([^'"]+)['"]/);
-        if (textMatch) {
-          seg.predicates.push({ type: "text", value: textMatch[1] });
-          continue;
-        }
-
-        // fallback: keep raw predicate
-        seg.predicates.push({ type: "other", value: pred });
-      }
-    }
-
-    segments.push(seg);
-  }
-
-  return segments;
-}
-
-// ------------------------ Searching inside document ------------------------
-
-async function findElementByXPath(editor, xpath) {
-  const xml = editor.document.getText();
-  const config = xpathBuilder.loadConfiguration();
-
-  // parse xpath into segments
-  const segments = parseXPath(xpath);
-  if (!segments || segments.length === 0) throw new Error("Invalid or empty XPath");
-
-  const events = xpathBuilder.tokenizeXML(xml, config);
-  if (!events) throw new Error("Failed to parse XML");
-
-  return searchForElement(events, segments, xml, config);
-}
-
-// This function scans events and returns first full match or the best partial match (closest)
-function searchForElement(events, xpathSegments, xml, config) {
-  const stack = [];
-  let bestMatch = null;
-  let maxMatchedDepth = 0;
-
-  // Counters configured same as builder
-  const counters = config.useParentScopedIndices ? {} : [];
-  const attributeCounters = {};
-
-  for (let i = 0; i < events.length; i++) {
-    const event = events[i];
-
-    if (event.type === "open") {
-      // index calculation (mirrors buildElementStack)
-      const depth = stack.length;
-      let idx;
-
-      let indexingAttribute = null;
-      let indexingValue = null;
-
-      if (config.useAttributeBasedIndexing) {
-        if (config.preferredAttributes && config.preferredAttributes.length > 0) {
-          for (const a of config.preferredAttributes) {
-            if (event.attrs && event.attrs[a]) {
-              indexingAttribute = a;
-              indexingValue = event.attrs[a];
-              break;
-            }
-          }
-        }
-        if (!indexingAttribute && config.attributeBasedIndexingAttribute) {
-          if (event.attrs && event.attrs[config.attributeBasedIndexingAttribute]) {
-            indexingAttribute = config.attributeBasedIndexingAttribute;
-            indexingValue = event.attrs[config.attributeBasedIndexingAttribute];
-          }
-        }
-      }
-
-      if (config.useAttributeBasedIndexing && indexingAttribute && indexingValue) {
-        const key = `${depth}-${event.tag}-${indexingAttribute}-${indexingValue}`;
-        if (!attributeCounters[key]) attributeCounters[key] = 0;
-        attributeCounters[key]++;
-        idx = attributeCounters[key];
-      } else if (config.useParentScopedIndices) {
-        const parentPath = stack.map((e) => `${e.tag}[${e.index}]`).join("/");
-        if (!counters[parentPath]) counters[parentPath] = {};
-        counters[parentPath][event.tag] = (counters[parentPath][event.tag] || 0) + 1;
-        idx = counters[parentPath][event.tag];
-      } else {
-        if (!counters[depth]) counters[depth] = {};
-        counters[depth][event.tag] = (counters[depth][event.tag] || 0) + 1;
-        idx = counters[depth][event.tag];
-      }
-
-      // preferred attributes
-      const preferredAttrs = [];
-      if (event.attrs && config.preferredAttributes) {
-        for (const attrName of config.preferredAttributes) {
-          if (event.attrs[attrName]) preferredAttrs.push({ name: attrName, value: event.attrs[attrName] });
-        }
-      }
-
-      // push stack item
-      stack.push({
-        tag: event.tag,
-        idx,
-        index: idx,
-        customIndex: event.customIndex,
-        customIndexRaw: event.customIndexRaw,
-        attrs: event.attrs,
-        indexingAttribute,
-        indexingValue,
-        preferredAttrs,
-        startOffset: event.pos,
-        eventIndex: i,
-      });
-
-      // Evaluate how deep this stack matches xpathSegments
-      const matchInfo = getMatchDepth(stack, xpathSegments, config);
-
-      // If match deeper than previous best, update bestMatch with element at matched depth - 1
-      if (matchInfo.depth > maxMatchedDepth) {
-        maxMatchedDepth = matchInfo.depth;
-
-        const matchedElementIndex = matchInfo.depth - 1;
-        if (matchedElementIndex >= 0 && matchedElementIndex < stack.length) {
-          const matchedElement = stack[matchedElementIndex];
-
-          // Compute end offset for the matched element (find its corresponding close)
-          const startEvtIdx = matchedElement.eventIndex;
-          const matchedTag = matchedElement.tag;
-          let openCount = 1;
-          let endOffset = matchedElement.startOffset + matchedTag.length + 2; // approximate end of opening tag
-
-          for (let j = startEvtIdx + 1; j < events.length; j++) {
-            if (events[j].type === "open" && events[j].tag === matchedTag) openCount++;
-            else if (events[j].type === "close" && events[j].tag === matchedTag) {
-              openCount--;
-              if (openCount === 0) {
-                // events[j].pos points at end of closing token in our tokenizer (we used pos=match.index or match.index+length)
-                // to be safe, set endOffset to the close event pos (it's near the >)
-                endOffset = events[j].pos;
-                break;
-              }
-            }
-          }
-
-          bestMatch = {
-            tagName: matchedElement.tag,
-            startOffset: matchedElement.startOffset,
-            endOffset: endOffset,
-            attrs: matchedElement.attrs,
-            matchedDepth: matchInfo.depth,
-            totalDepth: xpathSegments.length,
-            isPartial: matchInfo.depth !== xpathSegments.length,
-          };
-        }
-      }
-
-      // If we have a full match at current stack depth, return immediately (prefer first full match)
-      if (matchInfo.depth === xpathSegments.length) {
-        // full match: take last element on stack as target
-        const lastElement = stack[stack.length - 1];
-        // compute its end offset
-        let openCount = 1;
-        let endOffset = lastElement.startOffset + lastElement.tag.length + 2;
-        for (let j = lastElement.eventIndex + 1; j < events.length; j++) {
-          if (events[j].type === "open" && events[j].tag === lastElement.tag) openCount++;
-          else if (events[j].type === "close" && events[j].tag === lastElement.tag) {
-            openCount--;
-            if (openCount === 0) {
-              endOffset = events[j].pos;
-              break;
-            }
-          }
-        }
-
-        return {
-          tagName: lastElement.tag,
-          startOffset: lastElement.startOffset,
-          endOffset: endOffset,
-          attrs: lastElement.attrs,
-          matchedDepth: xpathSegments.length,
-          totalDepth: xpathSegments.length,
-          isPartial: false,
-        };
-      }
-    } else if (event.type === "close") {
-      if (stack.length > 0 && stack[stack.length - 1].tag === event.tag) {
-        stack.pop();
-      } else {
-        // best-effort: try to find the matching open item and pop to keep stack consistent
-        for (let k = stack.length - 1; k >= 0; k--) {
-          if (stack[k].tag === event.tag) {
-            stack.splice(k, 1);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // no full match; return best partial match (may be null)
-  return bestMatch;
-}
-
-// Helper: compute match depth similar to your getMatchDepth implementation but consolidated.
-// It respects attribute predicates and position predicates and accounts for config.useXlinkLabelIndex
-function getMatchDepth(stack, xpathSegments, config) {
-  let depth = 0;
-
-  for (let i = 0; i < Math.min(stack.length, xpathSegments.length); i++) {
-    const stackItem = stack[i];
-    const xpathSegment = xpathSegments[i];
-
-    // tag must match
-    if (stackItem.tag !== xpathSegment.tagName) break;
-
-    let allPredicatesMatch = true;
-
-    for (const pred of xpathSegment.predicates) {
-      if (pred.type === "position") {
-        // choose actual index to compare: customIndex if xlink label used, otherwise index
-        let actualIndex = stackItem.index;
-        if (config.useXlinkLabelIndex && stackItem.customIndex !== undefined) {
-          actualIndex = stackItem.customIndex;
-        }
-
-        // If attribute-based indexing is used and attributeBasedIndexingAttribute is present,
-        // stackItem.index already represents that indexing form (we mirrored that when building stack items).
-        if (actualIndex !== pred.value) {
-          allPredicatesMatch = false;
-          break;
-        }
-      } else if (pred.type === "attribute") {
-        if (!stackItem.attrs || stackItem.attrs[pred.name] !== pred.value) {
-          allPredicatesMatch = false;
-          break;
-        }
-      } else if (pred.type === "contains") {
-        if (!stackItem.attrs || !stackItem.attrs[pred.target] || !stackItem.attrs[pred.target].includes(pred.value)) {
-          allPredicatesMatch = false;
-          break;
-        }
-      } else if (pred.type === "text") {
-        // find immediate child text of the element. We'll scan events between eventIndex and the matching close
-        let textFound = "";
-        let openCount = 0;
-        const evtStart = stackItem.eventIndex;
-        for (let j = evtStart + 1; j < stackItem.eventIndex + 1000 && j < stackItem.eventIndex + 10000 && j < stackItem.eventIndex + 5000 && j < eventsLengthProxy();) {
-          // we can't access events here (closure), so keep text predicate unsupported in deep mode
-          // but we can conservatively fail so partial match won't incorrectly accept
-          textFound = "";
-          break;
-        }
-        // conservative: require false if we cannot reliably check
-        allPredicatesMatch = false;
-        break;
-      } else {
-        // other predicate — be conservative and require predicate string presence in attributes or skip matching it
-        // We'll attempt a best-effort: if predicate looks like @attr="val" we've already handled it; otherwise fail
-        allPredicatesMatch = false;
-        break;
-      }
-    }
-
-    if (!allPredicatesMatch) break;
-
-    depth++;
-  }
-
-  return { depth };
-}
-
-// eventsLengthProxy: small helper to avoid lint error when referencing events length inside getMatchDepth
-// (we keep getMatchDepth simple; complex text() matching would require passing events in)
-function eventsLengthProxy() {
-  // Use a very large number - getMatchDepth will not use it meaningfully
-  return 100000;
 }
 
 // ------------------------ Editor selection & commands ------------------------
@@ -434,7 +64,8 @@ async function searchWithXPath() {
   }
 
   try {
-    const result = await findElementByXPath(editor, xpath);
+    const config = xpathBuilder.loadConfiguration();
+    const result = await xpathSearcher.findElementByXPath(editor, xpath, config);
 
     if (result) {
       // Translate offsets to positions and select
@@ -464,7 +95,7 @@ async function searchWithXPath() {
   }
 }
 
-// Keep update/statusbar behavior mostly the same as your code
+// Keep update/statusbar behavior mostly the same
 function update() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isXmlLanguage(editor.document)) {
@@ -475,7 +106,10 @@ function update() {
   try {
     const config = xpathBuilder.loadConfiguration();
     if (config.useAttributeBasedIndexing) {
-      console.log(`Attribute-based indexing enabled: ${config.attributeBasedIndexingAttribute || "(auto)"}`);
+      const abAttrDisplay = Array.isArray(config.attributeBasedIndexingAttribute)
+        ? config.attributeBasedIndexingAttribute.join(", ")
+        : (config.attributeBasedIndexingAttribute || "(auto)");
+      console.log(`Attribute-based indexing enabled: ${abAttrDisplay}`);
     }
     const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active, config);
     if (xpath) {
@@ -510,7 +144,7 @@ function registerCommands(context) {
     "xmlXpath.toggleIgnoreParentSegment": () => toggleConfig("ignoreParentSegment", "Ignore Parent Segment"),
     "xmlXpath.setTemplate": setPredicateTemplate,
     "xmlXpath.setXlinkLabelPattern": setXlinkLabelPattern,
-    "xmlXpath.searchWithXPath": searchWithXPath, // <-- important: searches & highlights in-editor
+    "xmlXpath.searchWithXPath": searchWithXPath,
     "xmlXpath.setForceIndexOneFor": () => updateConfig("forceIndexOneFor", "Tags to force index [1] (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
     "xmlXpath.setExceptionsToIndexOneForcing": () => updateConfig("exceptionsToIndexOneForcing", "Tags that are exceptions to force index [1] (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
     "xmlXpath.toggleAttributeBasedIndexing": () => toggleConfig("useAttributeBasedIndexing", "Attribute-Based Indexing"),
@@ -518,14 +152,11 @@ function registerCommands(context) {
     "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
     "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
     "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
-    "xmlXpath.toggleUseSmartRelativePath": toggleUseSmartRelativePath,
-    "xmlXpath.setSmartRelativeNamespacePrefix": setSmartRelativeNamespacePrefix,
-    "xmlXpath.setSmartRelativeSignificantAttributes": setSmartRelativeSignificantAttributes,
-    "xmlXpath.toggleSmartRelativeIgnoreLastElement": toggleSmartRelativeIgnoreLastElement,
-    "xmlXpath.toggleSmartRelativeSingleLine": toggleSmartRelativeSingleLine,
-    "xmlXpath.setSmartRelativeVirtualRoot": setSmartRelativeVirtualRoot,
-    "xmlXpath.toggleSmartRelativeVirtualRootMode": toggleSmartRelativeVirtualRootMode,
-    "xmlXpath.clearSmartRelativeVirtualRoot": clearSmartRelativeVirtualRoot
+    "xmlXpath.setRelativeMustIncludeTags": () => updateConfig("relativeMustIncludeTags", "Relative must-include tags (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
+    "xmlXpath.setRelativeMustIgnoreTags": () => updateConfig("relativeMustIgnoreTags", "Relative must-ignore tags (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
+    "xmlXpath.setRelativeDontIgnoreAfter": () => updateConfig("relativeDontIgnoreAfter", "Relative 'Don't Ignore After' anchor tag name"),
+    "xmlXpath.clearRelativeDontIgnoreAfter": clearRelativeDontIgnoreAfter,
+    "xmlXpath.recalculateXPath": recalculateXPath
   };
 
   for (const [name, handler] of Object.entries(commands)) {
@@ -533,13 +164,12 @@ function registerCommands(context) {
   }
 }
 
-// ---------- helper UI/setters (kept mostly as in your file) ----------
+// ---------- helper UI/setters ----------
 
 async function setParentTag() {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const currentValue = cfg.get("parentTag", "");
 
-  // Try get tag under cursor using builder logic (like you had)
   let tagUnderCursor = "";
   const editor = vscode.window.activeTextEditor;
   if (editor && isXmlLanguage(editor.document)) {
@@ -643,32 +273,26 @@ async function copyUniversalXPath() {
   if (!editor || !isXmlLanguage(editor.document)) return;
 
   try {
-    const originalLoader = xpathBuilder.loadConfiguration;
-    const currentConfig = originalLoader();
-
-    xpathBuilder.loadConfiguration = function () {
-      return {
-        parentTag: null,
-        mode: { includeIndices: true, includeAttributes: true },
-        preferredAttributes: currentConfig.preferredAttributes || ["id", "name"],
-        ignoreTags: new Set(),
-        disableLeafIndex: false,
-        skipSingleIndex: false,
-        useXlinkLabelIndex: false,
-        useParentScopedIndices: false,
-        ignoreParentSegment: false,
-        predicateTemplate: "[@{attr1}='{attr1V}']",
-        xlinkLabelPattern: { type: "any", pattern: "" },
-        forceIndexOneFor: new Set(),
-        exceptionsToIndexOneForcing: new Set(),
-        useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
-        attributeBasedIndexingAttribute: currentConfig.attributeBasedIndexingAttribute,
-      };
+    const currentConfig = xpathBuilder.loadConfiguration();
+    const universalConfig = {
+      parentTag: null,
+      mode: { includeIndices: true, includeAttributes: true },
+      preferredAttributes: currentConfig.preferredAttributes || ["id", "name"],
+      ignoreTags: new Set(),
+      disableLeafIndex: false,
+      skipSingleIndex: false,
+      useXlinkLabelIndex: false,
+      useParentScopedIndices: true,
+      ignoreParentSegment: false,
+      predicateTemplate: "[@{attr1}='{attr1V}']",
+      xlinkLabelPattern: { type: "any", pattern: "" },
+      forceIndexOneFor: new Set(),
+      exceptionsToIndexOneForcing: new Set(),
+      useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
+      attributeBasedIndexingAttribute: currentConfig.attributeBasedIndexingAttribute,
     };
 
-    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
-
-    xpathBuilder.loadConfiguration = originalLoader;
+    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active, universalConfig);
 
     if (xpath) {
       await vscode.env.clipboard.writeText(xpath);
@@ -685,7 +309,8 @@ async function copyXPath() {
   if (!editor || !isXmlLanguage(editor.document)) return;
 
   try {
-    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active);
+    const config = xpathBuilder.loadConfiguration();
+    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active, config);
     if (xpath) {
       await vscode.env.clipboard.writeText(xpath);
       vscode.window.showInformationMessage(`Copied: ${truncate(xpath, 300)}`);
@@ -693,6 +318,28 @@ async function copyXPath() {
   } catch (err) {
     console.error("copyXPath error:", err);
     vscode.window.showErrorMessage("Could not compute XPath.");
+  }
+}
+
+async function recalculateXPath() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || !isXmlLanguage(editor.document)) {
+    vscode.window.showWarningMessage("No active XML document found.");
+    return;
+  }
+
+  try {
+    update();
+    const config = xpathBuilder.loadConfiguration();
+    const xpath = xpathBuilder.buildXPathRegex(editor.document, editor.selection.active, config);
+    if (xpath) {
+      vscode.window.showInformationMessage(`Recalculated XPath: ${xpath}`);
+    } else {
+      vscode.window.showWarningMessage("Could not generate XPath at current cursor position.");
+    }
+  } catch (err) {
+    console.error("recalculateXPath error:", err);
+    vscode.window.showErrorMessage(`Error recalculating XPath: ${err.message || err}`);
   }
 }
 
@@ -732,7 +379,6 @@ async function setMode() {
   }
 }
 
-// attribute-based indexing attribute setter
 async function setAttributeBasedIndexingAttribute() {
   const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
   const current = cfg.get("attributeBasedIndexingAttribute", "");
@@ -745,91 +391,29 @@ async function setAttributeBasedIndexingAttribute() {
 
   let value = pick.label;
   if (value === "Custom...") {
-    value = await vscode.window.showInputBox({ prompt: "Attribute name for attribute-based indexing", value: current, placeHolder: "e.g., ValuationType" });
-    if (!value) return;
+    const defaultText = Array.isArray(current) ? current.join(", ") : current;
+    const input = await vscode.window.showInputBox({ prompt: "Attribute name(s) for attribute-based indexing (comma separated for multiple)", value: defaultText, placeHolder: "e.g., valuationType, id" });
+    if (!input) return;
+    const parts = input.split(",").map(s => s.trim()).filter(Boolean);
+    value = parts.length > 1 ? parts : (parts[0] || "");
   }
 
   await cfg.update("attributeBasedIndexingAttribute", value, vscode.ConfigurationTarget.Global);
   update();
-  vscode.window.showInformationMessage(`Attribute-based indexing will use: ${value}`);
+  const valueStr = Array.isArray(value) ? value.join(", ") : value;
+  vscode.window.showInformationMessage(`Attribute-based indexing will use: ${valueStr}`);
 }
 
-// toggles from your file
+async function clearRelativeDontIgnoreAfter() {
+  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  await cfg.update("relativeDontIgnoreAfter", "", vscode.ConfigurationTarget.Global);
+  update();
+  vscode.window.showInformationMessage("Relative 'Don't Ignore After' anchor cleared.");
+}
+
 async function toggleUseRelativePath() { await toggleConfig("useRelativePath", "Use Relative Path"); }
 async function toggleIncludeNamespaces() { await toggleConfig("includeNamespaces", "Include Namespaces"); }
 async function toggleIncludeDefaultNamespaces() { await toggleConfig("includeDefaultNamespaces", "Include Default Namespaces"); }
-async function toggleUseSmartRelativePath() { await toggleConfig("useSmartRelativePath", "Smart Relative Path"); }
-async function setSmartRelativeNamespacePrefix() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeNamespacePrefix", "d");
-  const val = await vscode.window.showInputBox({ prompt: "Smart relative namespace prefix", value: current, placeHolder: "e.g., d, ns" });
-  if (val !== undefined) {
-    await cfg.update("smartRelativeNamespacePrefix", val, vscode.ConfigurationTarget.Global);
-    update();
-    vscode.window.showInformationMessage(`Smart relative prefix set to: ${val}`);
-  }
-}
-async function setSmartRelativeSignificantAttributes() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeSignificantAttributes", ["id","type","name"]);
-  const val = await vscode.window.showInputBox({ prompt: "Significant attributes (comma-separated)", value: (Array.isArray(current) ? current.join(", ") : current) });
-  if (val !== undefined) {
-    const arr = val.split(",").map(s => s.trim()).filter(Boolean);
-    await cfg.update("smartRelativeSignificantAttributes", arr, vscode.ConfigurationTarget.Global);
-    update();
-    vscode.window.showInformationMessage(`Significant attributes set to: ${arr.join(", ")}`);
-  }
-}
-async function toggleSmartRelativeIgnoreLastElement() { await toggleConfig("smartRelativeIgnoreLastElement", "Smart Relative Ignore Last Element"); }
-async function toggleSmartRelativeSingleLine() { await toggleConfig("smartRelativeSingleLine", "Smart Relative Single Line"); }
-async function setSmartRelativeVirtualRoot() {
-  // same implementation as your file — suggest a parent under cursor
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const current = cfg.get("smartRelativeVirtualRoot", "");
-  let tagUnderCursor = "";
-  const editor = vscode.window.activeTextEditor;
-  if (editor && isXmlLanguage(editor.document)) {
-    try {
-      const xml = editor.document.getText();
-      const offset = editor.document.offsetAt(editor.selection.active);
-      const config = xpathBuilder.loadConfiguration();
-      const events = xpathBuilder.tokenizeXML(xml, config);
-      if (events) {
-        const stackResult = xpathBuilder.buildElementStack(events, offset, config);
-        if (stackResult && stackResult.stack.length > 1) {
-          tagUnderCursor = stackResult.stack[stackResult.stack.length - 2].tag;
-        }
-      }
-    } catch (err) { console.error(err); }
-  }
-
-  const value = await vscode.window.showInputBox({
-    prompt: "Virtual root element for smart relative XPath",
-    value: tagUnderCursor || current,
-    placeHolder: "e.g., PROPERTY, VALUATION"
-  });
-
-  if (value !== undefined) {
-    await cfg.update("smartRelativeVirtualRoot", value.trim(), vscode.ConfigurationTarget.Global);
-    update();
-    if (value.trim()) vscode.window.showInformationMessage(`Virtual root set to: ${value.trim()}`);
-    else vscode.window.showInformationMessage("Virtual root cleared - using document root");
-  }
-}
-async function toggleSmartRelativeVirtualRootMode() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const cur = cfg.get("smartRelativeVirtualRootMode", "include");
-  const next = cur === "include" ? "exclude" : "include";
-  await cfg.update("smartRelativeVirtualRootMode", next, vscode.ConfigurationTarget.Global);
-  vscode.window.showInformationMessage(`Virtual Root Mode: ${next.toUpperCase()}`);
-  update();
-}
-async function clearSmartRelativeVirtualRoot() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("smartRelativeVirtualRoot", "", vscode.ConfigurationTarget.Global);
-  update();
-  vscode.window.showInformationMessage("Virtual root cleared");
-}
 
 // ------------------------ Activation ------------------------
 
