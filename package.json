@@ -2,7 +2,7 @@
   "name": "xml-xpath-extension",
   "displayName": "XML XPath Extension",
   "publisher": "HB24",
-  "version": "3.5.10",
+  "version": "3.5.11",
   "engines": {
     "vscode": "^1.50.0"
   },
