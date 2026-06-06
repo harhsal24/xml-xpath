@@ -67,14 +67,6 @@ User moves cursor
 
 Three strategies compute `[n]` — must match between generation and search:
 
-| Strategy | How Index Is Computed |
-|---|---|
-| **Global depth** (default) | Counter per `{depth, tagName}` across entire document |
-| **Parent-scoped** | Counter per `{parentPath, tagName}` — resets per parent |
-| **Attribute-based** | Counter per `{depth, tag, attrName, attrValue}` — separate sequence per attribute value |
-
-XLink label index overrides computed index using a number extracted from `xlink:label` via: `any`, `startsWith`, `contains`, `endsWith`, `exactPrefix`, or `regex`.
-
 ### Output Strategies
 
 #### 1. Absolute Path (default)
@@ -86,9 +78,8 @@ XLink label index overrides computed index using a number extracted from `xlink:
 ```
 //products[@type='electronics']//item[@id='laptop'][3]
 ```
-Keeps: root + elements with significant attributes + must-include tags + target.  
-Drops: elements in mustIgnore list, elements without significant attrs.  
-`relativeDontIgnoreAfter` anchor — everything after that ancestor is always kept.
+Keeps: root + elements with significant attributes + target.  
+Drops: elements without significant attrs.  
 
 #### 3. Smart Relative Path (`useSmartRelativePath`)
 
@@ -118,21 +109,6 @@ Landmark-based — builds a minimal path through significant ancestors.
 - `include` → XPath starts with `//VirtualRoot`
 - `exclude` → XPath starts from children of virtual root
 
-### Predicate Templates
-
-**Default:** `[@{attr1}='{attr1V}']`
-
-| Token | Meaning |
-|---|---|
-| `{attr1}` | Attribute name |
-| `{attr1V}` | Attribute value (auto-escaped) |
-| `{tag}` | Element tag name |
-| `{idx}` | Numeric index |
-| `{xllv}` | Raw xlink:label value |
-| `{xllvI}` | Numeric index from xlink:label |
-| `{attr:name}` | Any specific attribute value |
-| `{attrs}` | All attributes as `@a='v' and @b='w'` |
-| `{if:condition:ifTrue:ifFalse}` | Conditional (hasId, hasClass, isFirst) |
 
 ### Namespace Handling
 
@@ -158,18 +134,14 @@ Namespace map built by scanning all `xmlns:prefix="uri"` declarations and propag
 | 9 | Parent tag scoping | `parentTag` / `ignoreParentSegment` |
 | 10 | Attribute-based indexing | `useAttributeBasedIndexing` |
 | 11 | Preferred attributes | `preferredAttributes` |
-| 12 | Custom predicate templates | `predicateTemplate` |
 | 13 | Skip single `[1]` | `skipSingleIndex` |
 | 14 | Force `[1]` for tags | `forceIndexOneFor` |
 | 15 | Disable leaf index | `disableLeafIndex` |
 | 16 | Parent-scoped indexing | `useParentScopedIndices` |
-| 17 | xlink:label index | `useXlinkLabelIndex` |
 | 18 | Namespace support | `includeNamespaces` |
 | 19 | Always-include tags | `smartRelativeAlwaysIncludeTags` |
 | 20 | Don't-ignore-after anchor (smart) | `smartRelativeDontIgnoreAfter` |
-| 21 | Don't-ignore-after anchor (relative) | `relativeDontIgnoreAfter` |
 | 22 | Identifying children | `smartRelativeIdentifyingChildren` |
-| 23 | Must-include / must-ignore tags | `relativeMustIncludeTags` |
 | 24 | Ignore-index tags | `ignoreIndexTags` |
 | 25 | XPath mode (both/attrs/indices/simple) | `mode` |
 | 26 | Max parse size | `maxParseSize` |
@@ -260,10 +232,7 @@ If any predicate fails → break (all predicates must pass).
 ### Predicate Evaluation
 
 ```javascript
-// position
 let actualIndex = stackItem.index;
-if (config.useXlinkLabelIndex && stackItem.customIndex !== undefined)
-    actualIndex = stackItem.customIndex;
 if (actualIndex !== pred.value) → fail
 
 // attribute
@@ -319,7 +288,6 @@ Search   with config Y  →  May fail         (different index numbers)
 {
   "xmlXpath.mode": { "includeIndices": true, "includeAttributes": true },
   "xmlXpath.preferredAttributes": ["id", "type", "name"],
-  "xmlXpath.predicateTemplate": "[@{attr1}='{attr1V}']",
   "xmlXpath.parentTag": null,
   "xmlXpath.ignoreParentSegment": false,
   "xmlXpath.maxParseSize": 1000000,
@@ -331,12 +299,7 @@ Search   with config Y  →  May fail         (different index numbers)
   "xmlXpath.useParentScopedIndices": true,
   "xmlXpath.useAttributeBasedIndexing": false,
   "xmlXpath.attributeBasedIndexingAttribute": "",
-  "xmlXpath.useXlinkLabelIndex": false,
-  "xmlXpath.xlinkLabelPattern": { "type": "any", "pattern": "" },
   "xmlXpath.useRelativePath": false,
-  "xmlXpath.relativeMustIncludeTags": [],
-  "xmlXpath.relativeMustIgnoreTags": [],
-  "xmlXpath.relativeDontIgnoreAfter": "",
   "xmlXpath.useSmartRelativePath": false,
   "xmlXpath.smartRelativeNamespacePrefix": "d",
   "xmlXpath.smartRelativeSignificantAttributes": [],

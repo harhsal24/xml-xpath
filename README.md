@@ -4,7 +4,7 @@
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/HB24.xml-xpath-extension?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=HB24.xml-xpath-extension)
 [![Rating](https://img.shields.io/visual-studio-marketplace/r/HB24.xml-xpath-extension?style=flat-square)](https://marketplace.visualstudio.com/items?itemName=HB24.xml-xpath-extension)
 
-Easily generate, search, and navigate XPath expressions in Visual Studio Code directly from your XML files. Features advanced relative path landmarks, namespace support, virtual roots, customizable predicate templates, and robust indexing options.
+Easily generate, search, and navigate XPath expressions in Visual Studio Code directly from your XML files. Features namespace support, virtual roots, and robust indexing options.
 
 ---
 
@@ -14,10 +14,9 @@ Easily generate, search, and navigate XPath expressions in Visual Studio Code di
 - 🔍 **Search and Navigate with XPath** — Find and jump to elements using XPath queries (`Ctrl+Shift+F` or `Alt+Shift+X`). Handles full and partial matching.
 - 🌍 **Universal XPath** — Generate clean, standardized XPaths designed to work reliably across different XML files.
 - 📊 **Real-time Status Bar Preview** — Live XPath preview updates as you navigate, with click-to-copy.
-- 🔗 **Smart Relative Paths** — Generate concise relative paths (`//`) leveraging custom landmark elements and anchor points.
-- 🏷️ **Flexible Indexing Strategies** — Choose between Parent-Scoped, Global Depth, Attribute-Based, or XLink Label-Based indexing.
+- 🔗 **Smart Relative Paths** — Generate concise relative paths (`//`).
+- 🏷️ **Flexible Indexing Strategies** — Choose between Parent-Scoped, Global Depth, or Attribute-Based indexing.
 - 🌐 **Namespace-Aware Engine** — Handles prefix preservation and default namespaces with customizable prefixes (e.g. `d:tag`).
-- 🎨 **Custom Predicate Templates** — Completely customize predicate rendering using token variables and conditions.
 - 📁 **Wide Format Support** — Fully compatible with `.xml`, `.xsd`, `.xsl`, `.wsdl`, `.xaml`, `.svg`, `.xhtml`, and more.
 
 ---
@@ -58,7 +57,6 @@ Right-click anywhere in an XML file to quickly toggle core indexing settings:
 - **XML XPath: Copy XPath from Cursor**
 - **XML XPath: Toggle Disable Leaf Index**
 - **XML XPath: Toggle Skip Single Index**
-- **XML XPath: Toggle Use XLink Label Index**
 
 ---
 
@@ -88,21 +86,10 @@ Use the **Command Palette** (`Ctrl+Shift+P` / `F1`) to run these commands:
 - `XML XPath: Toggle Attribute-Based Indexing` — Group and count index sequences separately for elements with different attribute values.
 - `XML XPath: Set Attribute for Attribute-Based Indexing` — Select or type attributes to group by for attribute-based indexing.
 - `XML XPath: Set Preferred Attributes` — Configure attributes (comma-separated) prioritized when constructing predicates (e.g. `id, name, key`).
-- `XML XPath: Set Predicate Template` — Select predefined templates or define custom predicate tokens.
 
 ### 🌐 Namespace Controls
 - `XML XPath: Toggle Include Namespaces` — Enable or disable namespace prefixes in the XPath.
 - `XML XPath: Toggle Include Default Namespaces` — Handle default (unprefixed) namespaces.
-
-### 🚀 Relative Mode Customization
-- `XML XPath: Set Relative Must-Include Tags` — Specify landmark tags that must never be omitted in relative mode.
-- `XML XPath: Set Relative Must-Ignore Tags` — Specify tags to always ignore or skip over in relative paths.
-- `XML XPath: Set Relative 'Don't Ignore After' Anchor` — Define an ancestor tag name; everything past this ancestor will be kept in full.
-- `XML XPath: Clear Relative 'Don't Ignore After' Anchor` — Clears the relative anchor tag.
-
-### 🔬 Advanced Custom Indexing (xlink:label)
-- `XML XPath: Toggle Use XLink Label Index` — Extract numeric suffixes from `xlink:label` attributes to use as element indices.
-- `XML XPath: Set xlink:label Pattern` — Configure pattern types (`any`, `startsWith`, `contains`, `endsWith`, `exactPrefix`, `regex`) to extract indices.
 
 ---
 
@@ -163,27 +150,6 @@ Add these to your VS Code `settings.json` file to customize behavior:
   // Prefix to apply to default namespace elements
   "xmlXpath.defaultNamespacePrefix": "d",
 
-  // Predicate rendering template.
-  "xmlXpath.predicateTemplate": "[@{attr1}='{attr1V}']",
-
-  // Extract element index numbers from xlink:label
-  "xmlXpath.useXlinkLabelIndex": false,
-
-  // Pattern configuration for parsing xlink:label values
-  "xmlXpath.xlinkLabelPattern": {
-    "type": "any",
-    "pattern": ""
-  },
-
-  // Landmark tags that must be included when generating relative XPath
-  "xmlXpath.relativeMustIncludeTags": [],
-
-  // Tags that will always be ignored and skipped in relative paths
-  "xmlXpath.relativeMustIgnoreTags": [],
-
-  // Ancestor tag name past which elements are never skipped in relative mode
-  "xmlXpath.relativeDontIgnoreAfter": "",
-
   // Maximum file size in bytes to parse. Larger files use faster partial parsing.
   "xmlXpath.maxParseSize": 1000000
 }
@@ -207,11 +173,8 @@ The extension supports three primary ways to calculate numeric indices `[n]`:
 
 ---
 
-### 2. Relative Paths & Landmarks
-When `xmlXpath.useRelativePath` is enabled, the path is simplified using significant landmark nodes:
-- **Significant Nodes:** Root element, the target element, nodes containing preferred attributes, and tags in `relativeMustIncludeTags`.
-- **Must-Ignore Nodes:** Tags in `relativeMustIgnoreTags` are dropped.
-- **Anchor point:** If `relativeDontIgnoreAfter` matches an ancestor, all elements under that ancestor are preserved in full detail.
+### 2. Relative Paths
+When `xmlXpath.useRelativePath` is enabled, the path is simplified using significant landmark nodes (the root element, target element, and nodes with preferred/indexing attributes).
 
 *Example output:*
 ```xpath
@@ -231,39 +194,6 @@ If `xmlXpath.includeNamespaces` is ON, elements are prefixed:
 ```
 
 ---
-
-### 4. Custom Predicate Templates
-You can format predicates beyond simple attribute matching using `xmlXpath.predicateTemplate`.
-
-#### Available Template Tokens:
-| Token | Replaced With | Example Result |
-|---|---|---|
-| `{tag}` | Tag name | `item` |
-| `{idx}` / `{pos}` | Calculated numeric index | `2` |
-| `{at}` | Simple `@` character | `@` |
-| `{attr1}` | The matched preferred attribute name | `id` |
-| `{attr1V}` | The value of the matched preferred attribute | `prod-100` |
-| `{attrs}` | All element attributes separated by `and` | `@id='1' and @class='list'` |
-| `{attrCount}` | Total number of attributes on the node | `2` |
-| `{attr:name}` | Value of the specific attribute `name` | `custom-value` |
-| `{lastPos}` | Renders string literal `last()` | `last()` |
-| `{isFirst}` | Renders `true()` or `false()` based on index == 1 | `true()` |
-| `{isLast}` | Renders expression `position()=last()` | `position()=last()` |
-| `{xllv}` | Raw xlink:label attribute value | `label_2` |
-| `{xllvI}` | Numeric index extracted from xlink:label | `2` |
-| `{attr1Lower}` / `{attr1Upper}` | Lower/Upper case of preferred attribute name | `id` / `ID` |
-| `{attr1VLower}` / `{attr1VUpper}` | Lower/Upper case of preferred attribute value | `prod-100` / `PROD-100` |
-
-#### Conditional Statements:
-You can use ternary-like syntax `{if:condition:ifTrue:ifFalse}`:
-- `{if:hasId:ifTrue:ifFalse}` — Check if the element has an `id` attribute.
-- `{if:hasClass:ifTrue:ifFalse}` — Check if the element has a `class` attribute.
-- `{if:isFirst:ifTrue:ifFalse}` — Check if the element is the first occurrence.
-
-*Example Template:*
-```json
-"xmlXpath.predicateTemplate": "[@{attr1}='{attr1V}'][position()={idx}]"
-```
 
 ---
 

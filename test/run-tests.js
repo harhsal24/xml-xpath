@@ -53,12 +53,6 @@ const testCases = [
         config: { mode: { includeIndices: true } },
         expectedXPath: '/MegaStoreInventory[1]/ProductDetails[1]/Detail[1]/Description[1]/b[1]'
     },
-    {
-        description: 'Test 8: xlink:label Indexing',
-        cursor: { line: 49, character: 15 }, // Order xlink:label="order_B789"
-        config: { useXlinkLabelIndex: true, mode: { includeIndices: true } },
-        expectedXPath: '/MegaStoreInventory[1]/OnlineOrders[1]/Order[789]'
-    },
 ];
 
 // --- Test Runner Logic ---

@@ -37,10 +37,8 @@ function updateSettings(config) {
     "xmlXpath.mode": { "includeIndices": true, "includeAttributes": true },
     "xmlXpath.preferredAttributes": [],
     "xmlXpath.ignoreIndexTags": [],
-    "xmlXpath.predicateTemplate": "[@{attr1}='{attr1V}']",
     "xmlXpath.disableLeafIndex": false,
     "xmlXpath.skipSingleIndex": false,
-    "xmlXpath.useXlinkLabelIndex": false,
     "xmlXpath.useParentScopedIndices": true, // Default is true for testCases in test-suite.js now
     "xmlXpath.ignoreParentSegment": false,
     "xmlXpath.forceIndexOneFor": [],
@@ -50,10 +48,7 @@ function updateSettings(config) {
     "xmlXpath.useRelativePath": false,
     "xmlXpath.includeNamespaces": false,
     "xmlXpath.includeDefaultNamespaces": false,
-    "xmlXpath.defaultNamespacePrefix": "d",
-    "xmlXpath.relativeMustIncludeTags": [],
-    "xmlXpath.relativeMustIgnoreTags": [],
-    "xmlXpath.relativeDontIgnoreAfter": ""
+    "xmlXpath.defaultNamespacePrefix": "d"
   };
 
   const newSettings = { ...defaultSettings };

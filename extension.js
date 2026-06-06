@@ -139,11 +139,8 @@ function registerCommands(context) {
     "xmlXpath.copyUniversalXPath": copyUniversalXPath,
     "xmlXpath.toggleDisableLeafIndex": () => toggleConfig("disableLeafIndex", "Disable Leaf Index"),
     "xmlXpath.toggleSkipSingleIndex": () => toggleConfig("skipSingleIndex", "Skip Index [1]"),
-    "xmlXpath.toggleUseXlinkLabelIndex": () => toggleConfig("useXlinkLabelIndex", "Use xlink:label Index"),
     "xmlXpath.toggleParentScopedIndexing": () => toggleConfig("useParentScopedIndices", "Parent-Scoped Indexing"),
     "xmlXpath.toggleIgnoreParentSegment": () => toggleConfig("ignoreParentSegment", "Ignore Parent Segment"),
-    "xmlXpath.setTemplate": setPredicateTemplate,
-    "xmlXpath.setXlinkLabelPattern": setXlinkLabelPattern,
     "xmlXpath.searchWithXPath": searchWithXPath,
     "xmlXpath.setForceIndexOneFor": () => updateConfig("forceIndexOneFor", "Tags to force index [1] (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
     "xmlXpath.setExceptionsToIndexOneForcing": () => updateConfig("exceptionsToIndexOneForcing", "Tags that are exceptions to force index [1] (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
@@ -152,10 +149,6 @@ function registerCommands(context) {
     "xmlXpath.toggleUseRelativePath": toggleUseRelativePath,
     "xmlXpath.toggleIncludeNamespaces": toggleIncludeNamespaces,
     "xmlXpath.toggleIncludeDefaultNamespaces": toggleIncludeDefaultNamespaces,
-    "xmlXpath.setRelativeMustIncludeTags": () => updateConfig("relativeMustIncludeTags", "Relative must-include tags (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
-    "xmlXpath.setRelativeMustIgnoreTags": () => updateConfig("relativeMustIgnoreTags", "Relative must-ignore tags (comma-separated)", (v) => v.split(",").map(s => s.trim()).filter(Boolean)),
-    "xmlXpath.setRelativeDontIgnoreAfter": () => updateConfig("relativeDontIgnoreAfter", "Relative 'Don't Ignore After' anchor tag name"),
-    "xmlXpath.clearRelativeDontIgnoreAfter": clearRelativeDontIgnoreAfter,
     "xmlXpath.recalculateXPath": recalculateXPath
   };
 
@@ -209,64 +202,6 @@ async function clearParentTag() {
   vscode.window.showInformationMessage("Parent tag cleared.");
 }
 
-async function setPredicateTemplate() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentValue = cfg.get("predicateTemplate", "[@{attr1}='{attr1V}']");
-
-  const examples = [
-    { label: "Default: [@attr='value']", value: "[@{attr1}='{attr1V}']" },
-    { label: "Position: [@attr='value'][position()=n]", value: "[@{attr1}='{attr1V}'][position()={idx}]" },
-    { label: "Text: [text()='value']", value: "[text()='{attr1V}']" },
-    { label: "Custom...", value: "__custom__" },
-  ];
-
-  const pick = await vscode.window.showQuickPick(examples, { placeHolder: "Select predicate template or Custom" });
-  if (!pick) return;
-
-  let value = pick.value;
-  if (value === "__custom__") {
-    value = await vscode.window.showInputBox({
-      prompt: "Predicate template. Tokens: {at}=@, {attr1}, {attr1V}, {tag}, {idx}, {xllv}, {xllvI}",
-      value: currentValue,
-      placeHolder: "[@{attr1}='{attr1V}']",
-    });
-  }
-
-  if (value) {
-    await cfg.update("predicateTemplate", value, vscode.ConfigurationTarget.Global);
-    update();
-    const example = value.replace(/{at}/g, "@").replace(/{attr1}/g, "id").replace(/{attr1V}/g, "example").replace(/{tag}/g, "div").replace(/{idx}/g, "1");
-    vscode.window.showInformationMessage(`Template set. Example: ${example}`);
-  }
-}
-
-async function setXlinkLabelPattern() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  const currentPattern = cfg.get("xlinkLabelPattern", { type: "any", pattern: "" });
-
-  const types = [
-    { label: "Any number", value: { type: "any", pattern: "" } },
-    { label: "Starts with", value: { type: "startsWith", pattern: "__input__" } },
-    { label: "Contains", value: { type: "contains", pattern: "__input__" } },
-    { label: "Ends with", value: { type: "endsWith", pattern: "__input__" } },
-    { label: "Regex", value: { type: "regex", pattern: "__input__" } },
-    { label: "Exact prefix", value: { type: "exactPrefix", pattern: "__input__" } }
-  ];
-
-  const pick = await vscode.window.showQuickPick(types, { placeHolder: "Select xlink:label pattern type" });
-  if (!pick) return;
-
-  let pattern = pick.value.pattern;
-  if (pattern === "__input__") {
-    pattern = await vscode.window.showInputBox({ prompt: `Enter pattern for ${pick.label}`, value: currentPattern.type === pick.value.type ? currentPattern.pattern : "" });
-    if (pattern === undefined) return;
-  }
-
-  const newPattern = { type: pick.value.type, pattern };
-  await cfg.update("xlinkLabelPattern", newPattern, vscode.ConfigurationTarget.Global);
-  update();
-  vscode.window.showInformationMessage(`xlink:label pattern set to: ${newPattern.type}${pattern ? ` "${pattern}"` : ""}`);
-}
 
 async function copyUniversalXPath() {
   const editor = vscode.window.activeTextEditor;
@@ -281,11 +216,8 @@ async function copyUniversalXPath() {
       ignoreTags: new Set(),
       disableLeafIndex: false,
       skipSingleIndex: false,
-      useXlinkLabelIndex: false,
       useParentScopedIndices: true,
       ignoreParentSegment: false,
-      predicateTemplate: "[@{attr1}='{attr1V}']",
-      xlinkLabelPattern: { type: "any", pattern: "" },
       forceIndexOneFor: new Set(),
       exceptionsToIndexOneForcing: new Set(),
       useAttributeBasedIndexing: currentConfig.useAttributeBasedIndexing,
@@ -404,12 +336,6 @@ async function setAttributeBasedIndexingAttribute() {
   vscode.window.showInformationMessage(`Attribute-based indexing will use: ${valueStr}`);
 }
 
-async function clearRelativeDontIgnoreAfter() {
-  const cfg = vscode.workspace.getConfiguration(CONFIG_SECTION);
-  await cfg.update("relativeDontIgnoreAfter", "", vscode.ConfigurationTarget.Global);
-  update();
-  vscode.window.showInformationMessage("Relative 'Don't Ignore After' anchor cleared.");
-}
 
 async function toggleUseRelativePath() { await toggleConfig("useRelativePath", "Use Relative Path"); }
 async function toggleIncludeNamespaces() { await toggleConfig("includeNamespaces", "Include Namespaces"); }

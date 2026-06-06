@@ -67,34 +67,6 @@ const testCases = [
       "/CompanyData/Departments/dept:Engineering/dept:Budget[@currency='USD']",
   },
 
-  // xlink:label Tests
-  {
-    description: "Test 4.1: xlink:label indexing (project_205)",
-    cursor: { line: 61, character: 25 }, // Mobile App
-    config: {
-      useXlinkLabelIndex: true,
-      mode: { includeIndices: true, includeAttributes: false },
-    },
-    expectedXPath: "/CompanyData[1]/Projects[1]/Project[205]/Name[1]",
-  },
-  {
-    description: "Test 4.2: xlink:lable typo handling (project_303)",
-    cursor: { line: 65, character: 25 }, // Data Pipeline
-    config: {
-      useXlinkLabelIndex: true,
-      mode: { includeIndices: true, includeAttributes: false },
-    },
-    expectedXPath: "/CompanyData[1]/Projects[1]/Project[303]/Name[1]",
-  },
-  {
-    description: "Test 4.3: No xlink:label fallback",
-    cursor: { line: 69, character: 25 }, // Legacy System
-    config: {
-      useXlinkLabelIndex: true,
-      mode: { includeIndices: true, includeAttributes: false },
-    },
-    expectedXPath: "/CompanyData[1]/Projects[1]/Project[4]/Name[1]",
-  },
 
   // Parent-Scoped vs Global Indexing
   {
@@ -328,7 +300,6 @@ async function runTests() {
       t.description.startsWith("Test 2")
     ),
     Namespaces: testCases.filter((t) => t.description.startsWith("Test 3")),
-    "xlink:label": testCases.filter((t) => t.description.startsWith("Test 4")),
     "Indexing Modes": testCases.filter((t) =>
       t.description.startsWith("Test 5")
     ),

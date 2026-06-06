@@ -21,11 +21,8 @@
     "onCommand:xmlXpath.setIgnoreIndexTags",
     "onCommand:xmlXpath.toggleDisableLeafIndex",
     "onCommand:xmlXpath.toggleSkipSingleIndex",
-    "onCommand:xmlXpath.toggleUseXlinkLabelIndex",
     "onCommand:xmlXpath.toggleParentScopedIndexing",
     "onCommand:xmlXpath.toggleIgnoreParentSegment",
-    "onCommand:xmlXpath.setXlinkLabelPattern",
-    "onCommand:xmlXpath.setTemplate",
     "onCommand:xmlXpath.searchWithXPath",
     "onCommand:xmlXpath.toggleUseRelativePath",
     "onCommand:xmlXpath.toggleIncludeNamespaces",
@@ -34,10 +31,6 @@
     "onCommand:xmlXpath.setExceptionsToIndexOneForcing",
     "onCommand:xmlXpath.toggleAttributeBasedIndexing",
     "onCommand:xmlXpath.setAttributeBasedIndexingAttribute",
-    "onCommand:xmlXpath.setRelativeMustIncludeTags",
-    "onCommand:xmlXpath.setRelativeMustIgnoreTags",
-    "onCommand:xmlXpath.setRelativeDontIgnoreAfter",
-    "onCommand:xmlXpath.clearRelativeDontIgnoreAfter",
     "onCommand:xmlXpath.recalculateXPath"
   ],
   "main": "./extension.js",
@@ -79,11 +72,6 @@
         "category": "XML XPath"
       },
       {
-        "command": "xmlXpath.setTemplate",
-        "title": "XML XPath: Set Predicate Template",
-        "category": "XML XPath"
-      },
-      {
         "command": "xmlXpath.toggleDisableLeafIndex",
         "title": "XML XPath: Toggle Disable Leaf Index",
         "category": "XML XPath"
@@ -94,11 +82,6 @@
         "category": "XML XPath"
       },
       {
-        "command": "xmlXpath.toggleUseXlinkLabelIndex",
-        "title": "XML XPath: Toggle Use XLink Label Index",
-        "category": "XML XPath"
-      },
-      {
         "command": "xmlXpath.toggleParentScopedIndexing",
         "title": "XML XPath: Toggle Parent-Scoped Indexing",
         "category": "XML XPath"
@@ -106,11 +89,6 @@
       {
         "command": "xmlXpath.toggleIgnoreParentSegment",
         "title": "XML XPath: Toggle Ignore Parent Segment",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setXlinkLabelPattern",
-        "title": "XML XPath: Set xlink:label Pattern",
         "category": "XML XPath"
       },
       {
@@ -153,27 +131,6 @@
         "title": "XML XPath: Toggle Include Default Namespaces",
         "category": "XML XPath"
       },
-
-      {
-        "command": "xmlXpath.setRelativeMustIncludeTags",
-        "title": "XML XPath: Set Relative Must-Include Tags",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setRelativeMustIgnoreTags",
-        "title": "XML XPath: Set Relative Must-Ignore Tags",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.setRelativeDontIgnoreAfter",
-        "title": "XML XPath: Set Relative 'Don't Ignore After' Anchor",
-        "category": "XML XPath"
-      },
-      {
-        "command": "xmlXpath.clearRelativeDontIgnoreAfter",
-        "title": "XML XPath: Clear Relative 'Don't Ignore After' Anchor",
-        "category": "XML XPath"
-      },
       {
         "command": "xmlXpath.recalculateXPath",
         "title": "XML XPath: Recalculate XPath from Cursor",
@@ -214,11 +171,6 @@
           "command": "xmlXpath.toggleSkipSingleIndex",
           "when": "editorTextFocus",
           "group": "xmlXpath"
-        },
-        {
-          "command": "xmlXpath.toggleUseXlinkLabelIndex",
-          "when": "editorTextFocus",
-          "group": "xmlXpath"
         }
       ]
     },
@@ -257,11 +209,6 @@
           "default": [],
           "description": "Tags for which index [1] should be omitted in XPath."
         },
-        "xmlXpath.predicateTemplate": {
-          "type": "string",
-          "default": "[@{attr1}='{attr1V}']",
-          "description": "Template for predicate rendering. Tokens: {tag}, {attr1}, {attr1V}, {xllv}, {xllvI}, {idx}."
-        },
         "xmlXpath.disableLeafIndex": {
           "type": "boolean",
           "default": false,
@@ -271,11 +218,6 @@
           "type": "boolean",
           "default": false,
           "description": "If true, omit all [1] indexes (i.e. when an element is the only child of its tag at that level)."
-        },
-        "xmlXpath.useXlinkLabelIndex": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, use the numeric suffix parsed from xlink:label as the element index instead of the simple occurrence count."
         },
         "xmlXpath.useParentScopedIndices": {
           "type": "boolean",
@@ -292,14 +234,6 @@
           "default": 1000000,
           "minimum": 10000,
           "description": "Maximum file size (in bytes) for full document parsing. Files larger than this will use partial parsing for performance. Default: 1MB."
-        },
-        "xmlXpath.xlinkLabelPattern": {
-          "type": "object",
-          "default": {
-            "type": "any",
-            "pattern": ""
-          },
-          "description": "Pattern for extracting numbers from xlink:label values"
         },
         "xmlXpath.forceIndexOneFor": {
           "type": "array",
@@ -347,28 +281,6 @@
           "type": "boolean",
           "default": false,
           "description": "Include default namespace handling in XPath"
-        },
-
-        "xmlXpath.relativeMustIncludeTags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Tags that must be included when generating relative XPath (landmarks)."
-        },
-        "xmlXpath.relativeMustIgnoreTags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Tags to always ignore in relative XPath generation."
-        },
-        "xmlXpath.relativeDontIgnoreAfter": {
-          "type": "string",
-          "default": "",
-          "description": "Anchor tag name for relative mode: when set, elements after this ancestor will not be removed/ignored."
         },
         "xmlXpath.defaultNamespacePrefix": {
           "type": "string",

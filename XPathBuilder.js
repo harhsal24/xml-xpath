@@ -43,9 +43,6 @@ class XPathBuilder {
     return xmlTokenizer.parseAttributes(attrsText);
   }
 
-  parseXlinkLabel(attrs, config) {
-    return xmlTokenizer.parseXlinkLabel(attrs, config);
-  }
 
   extractNamespaceInfo(attrsText) {
     return xmlTokenizer.extractNamespaceInfo(attrsText);
@@ -184,8 +181,6 @@ class XPathBuilder {
         currentStack.push({
           tag: event.tag,
           idx,
-          customIndex: event.customIndex,
-          customIndexRaw: event.customIndexRaw,
           attrs: event.attrs,
           activeIndexingAttrs,
           preferredAttrs,
@@ -272,67 +267,11 @@ class XPathBuilder {
     return String(value).replace(/'/g, "&apos;");
   }
 
-  generateAttributePredicate(node, config) {
-    if (!node.attrName || !node.attrValue || !config.mode.includeAttributes) return "";
-
-    if (config.predicateTemplate) {
-      const escapedValue = this.escapeAttributeValue(node.attrValue);
-      let predicate = config.predicateTemplate;
-      const self = this;
-      predicate = predicate.replace(/{at}/g, "@");
-      predicate = predicate.replace(/{tag}/g, node.tag);
-      predicate = predicate.replace(/{attr1}/g, node.attrName);
-      predicate = predicate.replace(/{attr1V}/g, escapedValue);
-      predicate = predicate.replace(/{idx}/g, node.idx);
-
-      if (node.attrs) {
-        predicate = predicate.replace(/{attr:(\w+)}/g, (match, attrName) => {
-          return node.attrs[attrName] ? self.escapeAttributeValue(node.attrs[attrName]) : "";
-        });
-
-        if (predicate.includes("{attrs}")) {
-          const allAttrs = Object.entries(node.attrs)
-            .map(([k, v]) => `@${k}='${self.escapeAttributeValue(v)}'`)
-            .join(" and ");
-          predicate = predicate.replace(/{attrs}/g, allAttrs);
-        }
-
-        predicate = predicate.replace(/{attrCount}/g, Object.keys(node.attrs).length);
-      }
-
-      predicate = predicate.replace(/{pos}/g, node.idx);
-      predicate = predicate.replace(/{lastPos}/g, `last()`);
-      predicate = predicate.replace(/ {isFirst}/g, node.idx === 1 ? "true()" : "false()");
-      predicate = predicate.replace(/{isLast}/g, `position()=last()`);
-
-      if (node.customIndex !== undefined) {
-        predicate = predicate.replace(/{xllv}/g, node.customIndexRaw || "");
-        predicate = predicate.replace(/{xllvI}/g, node.customIndex);
-      }
-
-      predicate = predicate.replace(/{attr1Lower}/g, (node.attrName || "").toLowerCase());
-      predicate = predicate.replace(/{attr1Upper}/g, (node.attrName || "").toUpperCase());
-      predicate = predicate.replace(/{attr1VLower}/g, escapedValue.toLowerCase());
-      predicate = predicate.replace(/{attr1VUpper}/g, escapedValue.toUpperCase());
-
-      predicate = predicate.replace(/{if:([^:]+):([^:]+):([^}]+)}/g, (match, condition, ifTrue, ifFalse) => {
-        if (condition === "hasId") return node.attrs?.id ? ifTrue : ifFalse;
-        if (condition === "hasClass") return node.attrs?.class ? ifTrue : ifFalse;
-        if (condition === "isFirst") return node.idx === 1 ? ifTrue : ifFalse;
-        return ifFalse;
-      });
-
-      return predicate;
-    }
-
-    const escapedValue = this.escapeAttributeValue(node.attrValue);
-    return `[@${node.attrName}='${escapedValue}']`;
-  }
 
   generateIndex(node, isLeaf, config) {
     if (!config.mode.includeIndices || (isLeaf && config.disableLeafIndex)) return "";
 
-    const index = (config.useXlinkLabelIndex && node.customIndex != null) ? node.customIndex : node.idx;
+    const index = node.idx;
 
     if (index === 1 &&
       config.exceptionsToIndexOneForcing &&
@@ -392,44 +331,18 @@ class XPathBuilder {
     if (!path || path.length === 0) return "";
 
     let effectivePath = path.slice();
-
-    let startIndex = 0;
-    if (config.relativeDontIgnoreAfter) {
-      const anchorTag = config.relativeDontIgnoreAfter;
-      const anchorIndex = effectivePath.findIndex(el => el.tag === anchorTag);
-      if (anchorIndex >= 0) {
-        startIndex = anchorIndex;
-      } else {
-        startIndex = 0;
-      }
-    }
-
-    const mustInclude = Array.isArray(config.relativeMustIncludeTags) ? config.relativeMustIncludeTags.slice() : [];
-    const mustIgnore = Array.isArray(config.relativeMustIgnoreTags) ? config.relativeMustIgnoreTags.slice() : [];
-
     const landmarks = [];
 
-    if (effectivePath[startIndex]) {
+    if (effectivePath[0]) {
       landmarks.push({
-        element: effectivePath[startIndex],
+        element: effectivePath[0],
         isRoot: true,
-        isTarget: (startIndex === effectivePath.length - 1)
+        isTarget: (effectivePath.length === 1)
       });
     }
 
-    for (let i = startIndex; i < effectivePath.length; i++) {
+    for (let i = 0; i < effectivePath.length; i++) {
       const element = effectivePath[i];
-
-      if (mustIgnore.includes(element.tag)) continue;
-
-      if (mustInclude.includes(element.tag)) {
-        landmarks.push({
-          element,
-          isRoot: false,
-          isTarget: i === effectivePath.length - 1
-        });
-        continue;
-      }
 
       if (config.useAttributeBasedIndexing && config.attributeBasedIndexingAttribute) {
         let hasIndexingAttr = false;
